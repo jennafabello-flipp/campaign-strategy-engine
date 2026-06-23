@@ -166,7 +166,6 @@ def process_scroll_file(scroll_file, period_name=None):
     if period_name: agg['Period'] = period_name
     return agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
 
-
 # ==============================================================================
 # 🧠 DYNAMIC INSIGHT GENERATORS (WHAT, SO WHAT, NOW WHAT)
 # ==============================================================================
@@ -367,12 +366,27 @@ def render_head_to_head_variance():
 
         st.write("---")
         st.subheader("🏆 Slot 4: Shared SKU Micro-Delta")
-        sk_m = pd.merge(dfA_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index(), dfB_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index(), on='SKU', suffixes=(' Base', ' Variant'), how='inner')
+        st.markdown("<small>Isolates items that appeared in BOTH campaigns to measure direct performance changes.</small>", unsafe_allow_html=True)
+        skA = dfA_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
+        skB = dfB_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
+        sk_m = pd.merge(skA, skB, on='SKU', suffixes=(' Base', ' Variant'), how='inner')
+        
+        # FIX: Restored robust if/else block for missing matched SKUs
         if not sk_m.empty:
             sk_m['CTR Base'] = np.where(sk_m['Views Base'] > 0, sk_m['Clicks Base'] / sk_m['Views Base'], 0)
             sk_m['CTR Variant'] = np.where(sk_m['Views Variant'] > 0, sk_m['Clicks Variant'] / sk_m['Views Variant'], 0)
-            sk_m['CTR Shift'], sk_m['Price Shift'] = sk_m['CTR Variant'] - sk_m['CTR Base'], sk_m['Curr_Price Variant'] - sk_m['Curr_Price Base']
-            st.dataframe(sk_m[['SKU', 'Name Variant', 'Views Variant', 'Clicks Variant', 'CTR Base', 'CTR Variant', 'CTR Shift', 'Price Shift']].rename(columns={'Name Variant': 'Name'}).sort_values(by='CTR Shift', ascending=False).style.format({'Views Variant': '{:,.0f}', 'Clicks Variant': '{:,.0f}', 'CTR Base': '{:.2%}', 'CTR Variant': '{:.2%}', 'CTR Shift': '{:+.2%} pts', 'Price Shift': '${:+.2f}'}), use_container_width=True, hide_index=True)
+            sk_m['CTR Shift'] = sk_m['CTR Variant'] - sk_m['CTR Base']
+            sk_m['Price Shift'] = sk_m['Curr_Price Variant'] - sk_m['Curr_Price Base']
+            
+            final_sk = sk_m[['SKU', 'Name Variant', 'Views Variant', 'Clicks Variant', 'CTR Base', 'CTR Variant', 'CTR Shift', 'Price Shift']].copy()
+            final_sk.rename(columns={'Name Variant': 'Name'}, inplace=True)
+            
+            st.dataframe(final_sk.sort_values(by='CTR Shift', ascending=False).style.format({
+                'Views Variant': '{:,.0f}', 'Clicks Variant': '{:,.0f}', 'CTR Base': '{:.2%}', 'CTR Variant': '{:.2%}', 
+                'CTR Shift': '{:+.2%} pts', 'Price Shift': '${:+.2f}'
+            }), use_container_width=True, hide_index=True)
+        else:
+            st.info("No shared SKUs detected between these two flights.")
             
         st.write("---")
         st.subheader("🔄 Slot 5: YoY Assortment Turnover")
@@ -381,7 +395,6 @@ def render_head_to_head_variance():
             st.markdown("**Top New Items**")
             new_skus = dfB_prod[~dfB_prod['SKU'].isin(dfA_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
             new_skus['Item CTR'] = np.where(new_skus['Views'] > 0, new_skus['Clicks'] / new_skus['Views'], 0)
-            # FIX: Standard block structure for Streamlit Cloud stability
             if not new_skus.empty:
                 st.dataframe(new_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
             else:
@@ -391,7 +404,6 @@ def render_head_to_head_variance():
             st.markdown("**Top Retired Items**")
             ret_skus = dfA_prod[~dfA_prod['SKU'].isin(dfB_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
             ret_skus['Item CTR'] = np.where(ret_skus['Views'] > 0, ret_skus['Clicks'] / ret_skus['Views'], 0)
-            # FIX: Standard block structure for Streamlit Cloud stability
             if not ret_skus.empty:
                 st.dataframe(ret_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
             else:
@@ -436,4 +448,3 @@ st.sidebar.markdown("<h2 style='color:#002551;'>🚀 Control Panel</h2>", unsafe
 pipeline_mode = st.sidebar.radio("Select Strategy Module:", ["📁 Single Campaign Matrix", "📊 Head-to-Head Variance"])
 if pipeline_mode == "📁 Single Campaign Matrix": render_single_campaign_matrix()
 elif pipeline_mode == "📊 Head-to-Head Variance": render_head_to_head_variance()
-

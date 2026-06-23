@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -239,7 +238,6 @@ def render_single_campaign_matrix():
             
             st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
             
-            # 🧠 RENDER DYNAMIC INSIGHTS
             w, sw, nw = generate_single_insight(global_totals, df_prod)
             render_insight_box(w, sw, nw)
             
@@ -340,7 +338,6 @@ def render_head_to_head_variance():
         cat_m = pd.merge(catA[['Category', 'Alloc Base %']], catB[['Category', 'Alloc Variant %']], on='Category', how='outer').fillna(0)
         cat_m['Allocation Shift'] = cat_m['Alloc Variant %'] - cat_m['Alloc Base %']
 
-        # 🧠 RENDER DYNAMIC INSIGHTS
         w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m)
         render_insight_box(w, sw, nw)
         
@@ -384,12 +381,21 @@ def render_head_to_head_variance():
             st.markdown("**Top New Items**")
             new_skus = dfB_prod[~dfB_prod['SKU'].isin(dfA_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
             new_skus['Item CTR'] = np.where(new_skus['Views'] > 0, new_skus['Clicks'] / new_skus['Views'], 0)
-            st.dataframe(new_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True) if not new_skus.empty else st.caption("No new items.")
+            # FIX: Standard block structure for Streamlit Cloud stability
+            if not new_skus.empty:
+                st.dataframe(new_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No new items.")
+                
         with col_ret:
             st.markdown("**Top Retired Items**")
             ret_skus = dfA_prod[~dfA_prod['SKU'].isin(dfB_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
             ret_skus['Item CTR'] = np.where(ret_skus['Views'] > 0, ret_skus['Clicks'] / ret_skus['Views'], 0)
-            st.dataframe(ret_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True) if not ret_skus.empty else st.caption("No items retired.")
+            # FIX: Standard block structure for Streamlit Cloud stability
+            if not ret_skus.empty:
+                st.dataframe(ret_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            else:
+                st.caption("No items retired.")
 
         st.write("---")
         st.subheader("💰 Slot 6: YoY Pricing & Promotional Shift")
@@ -430,3 +436,4 @@ st.sidebar.markdown("<h2 style='color:#002551;'>🚀 Control Panel</h2>", unsafe
 pipeline_mode = st.sidebar.radio("Select Strategy Module:", ["📁 Single Campaign Matrix", "📊 Head-to-Head Variance"])
 if pipeline_mode == "📁 Single Campaign Matrix": render_single_campaign_matrix()
 elif pipeline_mode == "📊 Head-to-Head Variance": render_head_to_head_variance()
+

@@ -291,23 +291,13 @@ def render_single_campaign_matrix():
             with b_col:
                 st.markdown("**Holistic Brand Performance Matrix**")
                 brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
-                
-                # Dynamic % to Total calculations based on user input
                 brand_agg['Click Share %'] = brand_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
                 brand_agg['List Share %'] = brand_agg['Clips'] / cp_tot if cp_tot > 0 else 0
                 brand_agg['TTM Share %'] = brand_agg['TTMs'] / t_tot if t_tot > 0 else 0
-                
-                # Defining the exact column order to display
                 b_cols = ['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']
-                
                 st.dataframe(brand_agg[b_cols].sort_values(by='Clicks', ascending=False).head(15).style.format({
-                    'Unique_Items': '{:,.0f}', 
-                    'Clicks': '{:,.0f}', 
-                    'Clips': '{:,.0f}', 
-                    'TTMs': '{:,.0f}', 
-                    'Click Share %': '{:.2%}',
-                    'List Share %': '{:.2%}',
-                    'TTM Share %': '{:.2%}'
+                    'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                    'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
                 }), use_container_width=True, hide_index=True)
                 
             with c_col:
@@ -316,6 +306,28 @@ def render_single_campaign_matrix():
                     cr_agg = df_creative.groupby('Name').agg(Page=('Page','max'), Views=('Views','sum'), Clicks=('Clicks','sum')).reset_index()
                     cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
                     st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+            # 💰 NEW: Pricing & Promotional Band Analysis for Single Campaign
+            st.write("---")
+            st.subheader("💰 Pricing & Promotional Band Analysis")
+            
+            df_prod_bands = df_prod.copy()
+            df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
+            df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
+            
+            p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum')).reset_index()
+            p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0
+            
+            d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum')).reset_index()
+            d_agg['Click Share %'] = d_agg['Clicks'] / d_agg['Clicks'].sum() if d_agg['Clicks'].sum() > 0 else 0
+            
+            c_p, c_d = st.columns(2)
+            with c_p:
+                st.markdown("**Performance by Price Point**")
+                st.dataframe(p_agg.style.format({'Items': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+            with c_d:
+                st.markdown("**Performance by Discount Depth**")
+                st.dataframe(d_agg.style.format({'Items': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
 
             if scroll_file:
                 st.write("---")

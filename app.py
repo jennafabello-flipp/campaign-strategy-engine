@@ -307,7 +307,7 @@ def render_single_campaign_matrix():
                     cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
                     st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-            # 💰 NEW: Pricing & Promotional Band Analysis for Single Campaign
+            # 💰 NEW: Pricing & Promotional Band Analysis (Mirrored to Brand Style)
             st.write("---")
             st.subheader("💰 Pricing & Promotional Band Analysis")
             
@@ -315,19 +315,32 @@ def render_single_campaign_matrix():
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
-            p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum')).reset_index()
-            p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0
+            # Price Tier Aggregation
+            p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            p_agg['Click Share %'] = p_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
+            p_agg['List Share %'] = p_agg['Clips'] / cp_tot if cp_tot > 0 else 0
+            p_agg['TTM Share %'] = p_agg['TTMs'] / t_tot if t_tot > 0 else 0
             
-            d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum')).reset_index()
-            d_agg['Click Share %'] = d_agg['Clicks'] / d_agg['Clicks'].sum() if d_agg['Clicks'].sum() > 0 else 0
+            # Discount Tier Aggregation
+            d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            d_agg['Click Share %'] = d_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
+            d_agg['List Share %'] = d_agg['Clips'] / cp_tot if cp_tot > 0 else 0
+            d_agg['TTM Share %'] = d_agg['TTMs'] / t_tot if t_tot > 0 else 0
             
+            # Standard formatting dictionary
+            band_fmt = {
+                'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+            }
+            
+            # Rendering in two columns to match the prior layout
             c_p, c_d = st.columns(2)
             with c_p:
                 st.markdown("**Performance by Price Point**")
-                st.dataframe(p_agg.style.format({'Items': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(p_agg[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
             with c_d:
                 st.markdown("**Performance by Discount Depth**")
-                st.dataframe(d_agg.style.format({'Items': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(d_agg[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
 
             if scroll_file:
                 st.write("---")

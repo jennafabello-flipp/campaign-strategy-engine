@@ -61,7 +61,6 @@ def scrub_and_load_excel(uploaded_file):
                     if exact.lower() in col.lower(): return col
             return None
 
-        # Added URL tracking
         mapping = {
             'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
@@ -98,14 +97,11 @@ def process_metrics(df, m):
     is_sku_clone = (df['Brand'] == df[m['sku']]) | df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
     df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
 
-    # 🧠 THE 3-TIER BULLETPROOF FALLBACK LOGIC
     def normalize_sku(row):
-        # Tier 1: Existing SKU
         s = str(row[m['sku']]).strip() if m['sku'] else "UNKNOWN"
         if s.endswith('.0'): s = s[:-2]
         if s.lower() not in ['nan', 'none', '', 'null', '0', 'unknown']: return s
         
-        # Tier 2: URL Hunter (Shoppers Drug Mart & Standard Patterns)
         if m.get('url') and pd.notna(row[m['url']]):
             url = str(row[m['url']])
             match = re.search(r'(?:variantCode|sku|id|pid)=([A-Za-z0-9_-]+)', url, re.IGNORECASE)
@@ -113,7 +109,6 @@ def process_metrics(df, m):
             match_p = re.search(r'/p/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
             if match_p: return f"URL_{match_p.group(1).upper()}"
             
-        # Tier 3: Data Fingerprint (Brand + Page + Price)
         brand_clean = str(row['Brand']).strip().upper()
         page_clean = str(row['Page'])
         price_clean = str(row['Curr_Price'])
@@ -121,7 +116,6 @@ def process_metrics(df, m):
         if fingerprint != "GENERIC_PG1_0.0" and fingerprint != "UNKNOWN_PG1_0.0":
             return fingerprint
             
-        # Absolute Last Resort
         return str(row['Name']).upper()
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
@@ -296,9 +290,26 @@ def render_single_campaign_matrix():
             b_col, c_col = st.columns(2)
             with b_col:
                 st.markdown("**Holistic Brand Performance Matrix**")
-                brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), TTMs=('TTMs','sum')).reset_index()
-                brand_agg['Brand Transfer %'] = brand_agg['TTMs'] / t_tot if t_tot > 0 else 0
-                st.dataframe(brand_agg.sort_values(by='Clicks', ascending=False).head(15).style.format({'Unique_Items': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Brand Transfer %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
+                
+                # Dynamic % to Total calculations based on user input
+                brand_agg['Click Share %'] = brand_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
+                brand_agg['List Share %'] = brand_agg['Clips'] / cp_tot if cp_tot > 0 else 0
+                brand_agg['TTM Share %'] = brand_agg['TTMs'] / t_tot if t_tot > 0 else 0
+                
+                # Defining the exact column order to display
+                b_cols = ['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']
+                
+                st.dataframe(brand_agg[b_cols].sort_values(by='Clicks', ascending=False).head(15).style.format({
+                    'Unique_Items': '{:,.0f}', 
+                    'Clicks': '{:,.0f}', 
+                    'Clips': '{:,.0f}', 
+                    'TTMs': '{:,.0f}', 
+                    'Click Share %': '{:.2%}',
+                    'List Share %': '{:.2%}',
+                    'TTM Share %': '{:.2%}'
+                }), use_container_width=True, hide_index=True)
+                
             with c_col:
                 st.markdown("**Creative Marketing Asset Summary (Display Type: LINK)**")
                 if not df_creative.empty:

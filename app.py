@@ -93,7 +93,11 @@ def process_metrics(df, m):
     df['Discount_Pct'] = np.where(df['Orig_Price'] > 0, ((df['Orig_Price'] - df['Curr_Price']) / df['Orig_Price']) * 100, 0.0)
     df['Discount_Pct'] = np.where(df['Discount_Pct'] < 0, 0.0, df['Discount_Pct'])
 
-    is_sku_clone = (df['Brand'] == df[m['sku']]) | df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
+    # 🛡️ THE FIX: Safely check for SKU clones only if a SKU column exists
+    is_sku_clone = df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
+    if m['sku'] and m['sku'] in df.columns:
+        is_sku_clone = is_sku_clone | (df['Brand'] == df[m['sku']])
+        
     df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
 
     def normalize_sku(row):
@@ -119,7 +123,6 @@ def process_metrics(df, m):
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
 
-    # 🧠 NEW L1 & L2 WATERFALL LOGIC
     def get_l1(row):
         for key in ['c1', 'ret_cat', 'goo_l1']:
             if m[key] and pd.notna(row[m[key]]):
@@ -287,7 +290,6 @@ def render_single_campaign_matrix():
             st.write("---")
             st.subheader("📊 Item Allocation vs Click Share")
             
-            # Helper for category aggregation
             def build_cat_agg(cat_col):
                 c_agg = df_prod.groupby(cat_col).agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
                 c_agg['Item Allocation %'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
@@ -410,7 +412,6 @@ def render_head_to_head_variance():
         
         st.info(f"⚖️ **COMPARING:** {rA} ({dA_from} to {dA_to}) **VERSUS** {rB} ({dB_from} to {dB_to})")
         
-        # Build category shift matrices
         def build_shift_matrix(col_name):
             catA = dfA_prod.groupby(col_name).agg(CntA=('SKU', 'count'), ClkA=('Clicks', 'sum')).reset_index()
             catA['Alloc Base %'] = catA['CntA'] / catA['CntA'].sum() if catA['CntA'].sum() > 0 else 0

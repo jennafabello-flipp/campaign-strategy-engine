@@ -66,8 +66,8 @@ def scrub_and_load_excel(uploaded_file):
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
-            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']),
-            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']),
+            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']),
+            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']), 'goo_l3': get_col(['Google Category L3']),
             'views': get_col(['Total Item Views', 'Views']), 'clicks': get_col(['Total Item Clicks', 'Clicks']),
             'clips': get_col(['Total Clippings', 'Clips']), 'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTMS'])
         }
@@ -123,6 +123,7 @@ def process_metrics(df, m):
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
 
+    # 🧠 NEW L1, L2, and L3 WATERFALL LOGIC
     def get_l1(row):
         for key in ['c1', 'ret_cat', 'goo_l1']:
             if m[key] and pd.notna(row[m[key]]):
@@ -136,9 +137,17 @@ def process_metrics(df, m):
                 val = str(row[m[key]]).strip()
                 if val not in ["", "NULL", "nan", "NaN", "None"]: return val
         return "Uncategorized Sub-Department"
+        
+    def get_l3(row):
+        for key in ['c3', 'goo_l3']:
+            if m[key] and pd.notna(row[m[key]]):
+                val = str(row[m[key]]).strip()
+                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        return "Uncategorized Item-Level"
 
     df['L1_Category'] = df.apply(get_l1, axis=1)
     df['L2_Category'] = df.apply(get_l2, axis=1)
+    df['L3_Category'] = df.apply(get_l3, axis=1)
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
@@ -298,8 +307,9 @@ def render_single_campaign_matrix():
 
             cat_l1_agg = build_cat_agg('L1_Category')
             cat_l2_agg = build_cat_agg('L2_Category')
+            cat_l3_agg = build_cat_agg('L3_Category')
             
-            tab_l1, tab_l2 = st.tabs(["L1 Primary Category", "L2 Subcategory"])
+            tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
             
             with tab_l1:
                 col_t1, col_c1 = st.columns(2)
@@ -310,6 +320,11 @@ def render_single_campaign_matrix():
                 col_t2, col_c2 = st.columns(2)
                 with col_t2: st.dataframe(cat_l2_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
                 with col_c2: st.plotly_chart(px.bar(cat_l2_agg.melt(id_vars='L2_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L2 Subcategory Share Allocation"), use_container_width=True)
+
+            with tab_l3:
+                col_t3, col_c3 = st.columns(2)
+                with col_t3: st.dataframe(cat_l3_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                with col_c3: st.plotly_chart(px.bar(cat_l3_agg.melt(id_vars='L3_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L3 Sub-subcategory Share Allocation"), use_container_width=True)
 
             st.write("---")
             st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
@@ -423,6 +438,7 @@ def render_head_to_head_variance():
             
         cat_m_l1 = build_shift_matrix('L1_Category')
         cat_m_l2 = build_shift_matrix('L2_Category')
+        cat_m_l3 = build_shift_matrix('L3_Category')
 
         w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m_l1)
         render_insight_box(w, sw, nw)
@@ -449,11 +465,13 @@ def render_head_to_head_variance():
 
         st.write("---")
         st.subheader("📊 Slot 3: Category Share Shifts")
-        tab_h2h_l1, tab_h2h_l2 = st.tabs(["L1 Primary Category Shifts", "L2 Subcategory Shifts"])
+        tab_h2h_l1, tab_h2h_l2, tab_h2h_l3 = st.tabs(["L1 Primary Category Shifts", "L2 Subcategory Shifts", "L3 Sub-subcategory Shifts"])
         with tab_h2h_l1:
             st.dataframe(cat_m_l1.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
         with tab_h2h_l2:
             st.dataframe(cat_m_l2.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+        with tab_h2h_l3:
+            st.dataframe(cat_m_l3.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
 
         st.write("---")
         st.subheader("🏆 Slot 4: Shared SKU Micro-Delta")

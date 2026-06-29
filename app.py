@@ -66,9 +66,8 @@ def scrub_and_load_excel(uploaded_file):
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
-            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']), 
-            'c4': get_col(['Custom ID 4']), 'c5': get_col(['Custom ID 5']), 'c6': get_col(['Custom ID 6']),
-            'ret_cat': get_col(['Retailer Category']), 'goo_cat': get_col(['Google Category L1']),
+            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']),
+            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']),
             'views': get_col(['Total Item Views', 'Views']), 'clicks': get_col(['Total Item Clicks', 'Clicks']),
             'clips': get_col(['Total Clippings', 'Clips']), 'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTMS'])
         }
@@ -120,13 +119,23 @@ def process_metrics(df, m):
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
 
-    def run_waterfall(row):
-        for key in ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'ret_cat', 'goo_cat']:
+    # 🧠 NEW L1 & L2 WATERFALL LOGIC
+    def get_l1(row):
+        for key in ['c1', 'ret_cat', 'goo_l1']:
             if m[key] and pd.notna(row[m[key]]):
                 val = str(row[m[key]]).strip()
                 if val not in ["", "NULL", "nan", "NaN", "None"]: return val
         return "General Merchandise"
-    df['Category'] = df.apply(run_waterfall, axis=1)
+
+    def get_l2(row):
+        for key in ['c2', 'goo_l2']:
+            if m[key] and pd.notna(row[m[key]]):
+                val = str(row[m[key]]).strip()
+                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        return "Uncategorized Sub-Department"
+
+    df['L1_Category'] = df.apply(get_l1, axis=1)
+    df['L2_Category'] = df.apply(get_l2, axis=1)
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
@@ -191,15 +200,15 @@ def process_scroll_file(scroll_file, period_name=None):
 def generate_single_insight(glo, df_prod):
     what = f"The campaign generated **{glo['views']:,.0f} views** and **{glo['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(glo['clicks']/glo['views']) if glo['views']>0 else 0:.2%}**."
     
-    top_cat = df_prod.groupby('Category')['Clicks'].sum().idxmax()
-    top_brand = df_prod.groupby('Brand')['Clicks'].sum().idxmax()
-    so_what = f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity."
+    top_cat = df_prod.groupby('L1_Category')['Clicks'].sum().idxmax() if not df_prod.empty else "General Merchandise"
+    top_brand = df_prod.groupby('Brand')['Clicks'].sum().idxmax() if not df_prod.empty else "UNKNOWN"
     
+    so_what = f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity."
     now_what = f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 CTR items to identify high-performing assets that can be repurposed in future creative."
     
     return what, so_what, now_what
 
-def generate_h2h_insight(gloA, gloB, cat_m):
+def generate_h2h_insight(gloA, gloB, cat_m_l1):
     v_del = (gloB['views'] - gloA['views']) / gloA['views'] if gloA['views'] > 0 else 0
     c_del = (gloB['clicks'] - gloA['clicks']) / gloA['clicks'] if gloA['clicks'] > 0 else 0
     
@@ -216,9 +225,9 @@ def generate_h2h_insight(gloA, gloB, cat_m):
     else:
         so_what = "Both reach and engagement contracted. The flight experienced macro-level headwinds, requiring a review of both traffic acquisition and merchandising strategy."
         
-    cat_m['Efficiency'] = cat_m['Alloc Variant %'] - cat_m['Alloc Base %']
-    if not cat_m.empty:
-        top_cat = cat_m.loc[cat_m['Allocation Shift'].idxmax()]['Category']
+    cat_m_l1['Efficiency'] = cat_m_l1['Alloc Variant %'] - cat_m_l1['Alloc Base %']
+    if not cat_m_l1.empty:
+        top_cat = cat_m_l1.loc[cat_m_l1['Allocation Shift'].idxmax()]['L1_Category']
         now_what = f"**1. Reallocate Space:** The '{top_cat}' category saw the highest positive shift in user click share. Consider increasing its footprint in the next flyer.<br>**2. Audit Product Churn:** Review the 'YoY Assortment Turnover' table below to verify if the newly introduced SKUs actually outperformed the items retired from the Base year."
     else:
         now_what = "Review the 'YoY Assortment Turnover' to verify if the newly introduced SKUs actually outperformed the retired items."
@@ -277,13 +286,28 @@ def render_single_campaign_matrix():
             
             st.write("---")
             st.subheader("📊 Item Allocation vs Click Share")
-            cat_agg = df_prod.groupby('Category').agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-            cat_agg['Item Allocation %'] = cat_agg['Count'] / cat_agg['Count'].sum() if cat_agg['Count'].sum() > 0 else 0
-            cat_agg['Click Share %'] = cat_agg['Clicks'] / cat_agg['Clicks'].sum() if cat_agg['Clicks'].sum() > 0 else 0
             
-            col_table, col_chart = st.columns(2)
-            with col_table: st.dataframe(cat_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
-            with col_chart: st.plotly_chart(px.bar(cat_agg.melt(id_vars='Category', value_vars=['Item Allocation %', 'Click Share %']), x='Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="Category Share Allocation"), use_container_width=True)
+            # Helper for category aggregation
+            def build_cat_agg(cat_col):
+                c_agg = df_prod.groupby(cat_col).agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                c_agg['Item Allocation %'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
+                c_agg['Click Share %'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
+                return c_agg
+
+            cat_l1_agg = build_cat_agg('L1_Category')
+            cat_l2_agg = build_cat_agg('L2_Category')
+            
+            tab_l1, tab_l2 = st.tabs(["L1 Primary Category", "L2 Subcategory"])
+            
+            with tab_l1:
+                col_t1, col_c1 = st.columns(2)
+                with col_t1: st.dataframe(cat_l1_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                with col_c1: st.plotly_chart(px.bar(cat_l1_agg.melt(id_vars='L1_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L1 Category Share Allocation"), use_container_width=True)
+                
+            with tab_l2:
+                col_t2, col_c2 = st.columns(2)
+                with col_t2: st.dataframe(cat_l2_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                with col_c2: st.plotly_chart(px.bar(cat_l2_agg.melt(id_vars='L2_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L2 Subcategory Share Allocation"), use_container_width=True)
 
             st.write("---")
             st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
@@ -307,7 +331,6 @@ def render_single_campaign_matrix():
                     cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
                     st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-            # 💰 NEW: Pricing & Promotional Band Analysis (Mirrored to Brand Style)
             st.write("---")
             st.subheader("💰 Pricing & Promotional Band Analysis")
             
@@ -315,25 +338,21 @@ def render_single_campaign_matrix():
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
-            # Price Tier Aggregation
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             p_agg['Click Share %'] = p_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
             p_agg['List Share %'] = p_agg['Clips'] / cp_tot if cp_tot > 0 else 0
             p_agg['TTM Share %'] = p_agg['TTMs'] / t_tot if t_tot > 0 else 0
             
-            # Discount Tier Aggregation
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             d_agg['Click Share %'] = d_agg['Clicks'] / cl_tot if cl_tot > 0 else 0
             d_agg['List Share %'] = d_agg['Clips'] / cp_tot if cp_tot > 0 else 0
             d_agg['TTM Share %'] = d_agg['TTMs'] / t_tot if t_tot > 0 else 0
             
-            # Standard formatting dictionary
             band_fmt = {
                 'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
                 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
             }
             
-            # Rendering in two columns to match the prior layout
             c_p, c_d = st.columns(2)
             with c_p:
                 st.markdown("**Performance by Price Point**")
@@ -391,14 +410,20 @@ def render_head_to_head_variance():
         
         st.info(f"⚖️ **COMPARING:** {rA} ({dA_from} to {dA_to}) **VERSUS** {rB} ({dB_from} to {dB_to})")
         
-        catA = dfA_prod.groupby('Category').agg(CntA=('SKU', 'count'), ClkA=('Clicks', 'sum')).reset_index()
-        catA['Alloc Base %'] = catA['CntA'] / catA['CntA'].sum() if catA['CntA'].sum() > 0 else 0
-        catB = dfB_prod.groupby('Category').agg(CntB=('SKU', 'count'), ClkB=('Clicks', 'sum')).reset_index()
-        catB['Alloc Variant %'] = catB['CntB'] / catB['CntB'].sum() if catB['CntB'].sum() > 0 else 0
-        cat_m = pd.merge(catA[['Category', 'Alloc Base %']], catB[['Category', 'Alloc Variant %']], on='Category', how='outer').fillna(0)
-        cat_m['Allocation Shift'] = cat_m['Alloc Variant %'] - cat_m['Alloc Base %']
+        # Build category shift matrices
+        def build_shift_matrix(col_name):
+            catA = dfA_prod.groupby(col_name).agg(CntA=('SKU', 'count'), ClkA=('Clicks', 'sum')).reset_index()
+            catA['Alloc Base %'] = catA['CntA'] / catA['CntA'].sum() if catA['CntA'].sum() > 0 else 0
+            catB = dfB_prod.groupby(col_name).agg(CntB=('SKU', 'count'), ClkB=('Clicks', 'sum')).reset_index()
+            catB['Alloc Variant %'] = catB['CntB'] / catB['CntB'].sum() if catB['CntB'].sum() > 0 else 0
+            cat_m = pd.merge(catA[[col_name, 'Alloc Base %']], catB[[col_name, 'Alloc Variant %']], on=col_name, how='outer').fillna(0)
+            cat_m['Allocation Shift'] = cat_m['Alloc Variant %'] - cat_m['Alloc Base %']
+            return cat_m
+            
+        cat_m_l1 = build_shift_matrix('L1_Category')
+        cat_m_l2 = build_shift_matrix('L2_Category')
 
-        w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m)
+        w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m_l1)
         render_insight_box(w, sw, nw)
         
         def calc_delta(base, var): return 1.0 if base == 0 and var > 0 else (0.0 if base == 0 else (var - base) / base)
@@ -423,7 +448,11 @@ def render_head_to_head_variance():
 
         st.write("---")
         st.subheader("📊 Slot 3: Category Share Shifts")
-        st.dataframe(cat_m.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+        tab_h2h_l1, tab_h2h_l2 = st.tabs(["L1 Primary Category Shifts", "L2 Subcategory Shifts"])
+        with tab_h2h_l1:
+            st.dataframe(cat_m_l1.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+        with tab_h2h_l2:
+            st.dataframe(cat_m_l2.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
 
         st.write("---")
         st.subheader("🏆 Slot 4: Shared SKU Micro-Delta")

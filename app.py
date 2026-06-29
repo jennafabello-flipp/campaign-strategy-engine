@@ -61,11 +61,12 @@ def scrub_and_load_excel(uploaded_file):
                     if exact.lower() in col.lower(): return col
             return None
 
+        # Added URL tracking
         mapping = {
             'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
-            'curr_price': get_col(['Total Current Price', 'Current Price']),
+            'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
             'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']), 
             'c4': get_col(['Custom ID 4']), 'c5': get_col(['Custom ID 5']), 'c6': get_col(['Custom ID 6']),
             'ret_cat': get_col(['Retailer Category']), 'goo_cat': get_col(['Google Category L1']),
@@ -78,19 +79,11 @@ def scrub_and_load_excel(uploaded_file):
         return None, None, None
 
 def process_metrics(df, m):
-    def normalize_sku(val):
-        s = str(val).strip()
-        return s[:-2] if s.endswith('.0') else (s if s not in ['nan', 'NaN', 'None', ''] else "UNKNOWN")
-        
-    df['SKU'] = df[m['sku']].apply(normalize_sku) if m['sku'] else "UNKNOWN"
     df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
     df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] else "PRODUCT"
     df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] else 1
-    
     df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
-    is_sku_clone = (df['Brand'] == df['SKU']) | df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
-    df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
-        
+    
     def safe_numeric(col_name):
         if m[col_name] and m[col_name] in df.columns:
             cleaned = df[m[col_name]].astype(str).str.replace(r'[^\d.]', '', regex=True).replace('', '0')
@@ -102,6 +95,37 @@ def process_metrics(df, m):
     df['Discount_Pct'] = np.where(df['Orig_Price'] > 0, ((df['Orig_Price'] - df['Curr_Price']) / df['Orig_Price']) * 100, 0.0)
     df['Discount_Pct'] = np.where(df['Discount_Pct'] < 0, 0.0, df['Discount_Pct'])
 
+    is_sku_clone = (df['Brand'] == df[m['sku']]) | df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
+    df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
+
+    # 🧠 THE 3-TIER BULLETPROOF FALLBACK LOGIC
+    def normalize_sku(row):
+        # Tier 1: Existing SKU
+        s = str(row[m['sku']]).strip() if m['sku'] else "UNKNOWN"
+        if s.endswith('.0'): s = s[:-2]
+        if s.lower() not in ['nan', 'none', '', 'null', '0', 'unknown']: return s
+        
+        # Tier 2: URL Hunter (Shoppers Drug Mart & Standard Patterns)
+        if m.get('url') and pd.notna(row[m['url']]):
+            url = str(row[m['url']])
+            match = re.search(r'(?:variantCode|sku|id|pid)=([A-Za-z0-9_-]+)', url, re.IGNORECASE)
+            if match: return f"URL_{match.group(1).upper()}"
+            match_p = re.search(r'/p/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
+            if match_p: return f"URL_{match_p.group(1).upper()}"
+            
+        # Tier 3: Data Fingerprint (Brand + Page + Price)
+        brand_clean = str(row['Brand']).strip().upper()
+        page_clean = str(row['Page'])
+        price_clean = str(row['Curr_Price'])
+        fingerprint = f"{brand_clean}_PG{page_clean}_{price_clean}"
+        if fingerprint != "GENERIC_PG1_0.0" and fingerprint != "UNKNOWN_PG1_0.0":
+            return fingerprint
+            
+        # Absolute Last Resort
+        return str(row['Name']).upper()
+        
+    df['SKU'] = df.apply(normalize_sku, axis=1)
+
     def run_waterfall(row):
         for key in ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'ret_cat', 'goo_cat']:
             if m[key] and pd.notna(row[m[key]]):
@@ -111,8 +135,9 @@ def process_metrics(df, m):
     df['Category'] = df.apply(run_waterfall, axis=1)
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
-    is_invalid_sku = df['SKU'].isin(['UNKNOWN', '0', 'none', 'null', 'nan'])
-    return df[~is_invalid_sku].copy(), df[is_invalid_sku & ((df['Display_Type'] == "LINK") | (df['Name'].str.contains('BANNER', case=False, na=False)))].copy(), global_totals
+    
+    is_marketing_link = (df['Display_Type'] == "LINK") | (df['Name'].str.contains('BANNER', case=False, na=False))
+    return df[~is_marketing_link].copy(), df[is_marketing_link].copy(), global_totals
 
 def extract_exact_metadata(df_clean):
     try:
@@ -371,7 +396,6 @@ def render_head_to_head_variance():
         skB = dfB_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
         sk_m = pd.merge(skA, skB, on='SKU', suffixes=(' Base', ' Variant'), how='inner')
         
-        # FIX: Restored robust if/else block for missing matched SKUs
         if not sk_m.empty:
             sk_m['CTR Base'] = np.where(sk_m['Views Base'] > 0, sk_m['Clicks Base'] / sk_m['Views Base'], 0)
             sk_m['CTR Variant'] = np.where(sk_m['Views Variant'] > 0, sk_m['Clicks Variant'] / sk_m['Views Variant'], 0)

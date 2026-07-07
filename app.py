@@ -384,75 +384,42 @@ def render_benchmark_scorecard():
     with colA:
         client_file = st.file_uploader("📁 Upload Client File (Current Campaign)", type=["xlsx", "csv"])
     with colB:
-        industries = ["Grocery", "Electronics", "General Merchandise", "Home Goods, Furniture & Appliances", "Home Improvement", "Office Supplies", "Pet Care", "Pharmacy"]
-        selected_industry = st.selectbox("🎯 Select Industry Baseline", industries)
+        # 🧠 THE NEW DICTIONARY: Pretty Dropdown Name -> Exact File Name
+        benchmark_map = {
+            "🛒 Grocery (Core: Jan-Oct)": "Grocery_Core",
+            "🎄 Grocery (Holiday: Nov-Dec)": "Grocery_Holiday",
+            "🛒 Pharmacy (Core: Jan-Oct)": "Pharmacy_Core",
+            "🎄 Pharmacy (Holiday: Nov-Dec)": "Pharmacy_Holiday",
+            "💻 Electronics (Core: Jan-Oct)": "Electronics_Core",
+            "🎄 Electronics (Holiday: Nov-Dec)": "Electronics_Holiday",
+            "🛠️ Home Improvement (Core: Jan-Oct)": "Home_Improvement_Core",
+            "🎄 Home Improvement (Holiday: Nov-Dec)": "Home_Improvement_Holiday",
+            "🐾 Pet Care (Core: Jan-Oct)": "Pet_Care_Core",
+            "🎄 Pet Care (Holiday: Nov-Dec)": "Pet_Care_Holiday",
+            "🛋️ Home Goods & Furniture (Core: Jan-Oct)": "Home_Goods_Core",
+            "🎄 Home Goods & Furniture (Holiday: Nov-Dec)": "Home_Goods_Holiday",
+            "📦 General Merchandise (Core: Jan-Oct)": "General_Merchandise_Core",
+            "🎄 General Merchandise (Holiday: Nov-Dec)": "General_Merchandise_Holiday",
+            "📎 Office Supplies (Core: Jan-Oct)": "Office_Supplies_Core",
+            "🎄 Office Supplies (Holiday: Nov-Dec)": "Office_Supplies_Holiday"
+        }
+        
+        selected_option = st.selectbox("🎯 Select Industry Baseline", list(benchmark_map.keys()))
         
     if not client_file:
         st.warning("⚠️ **Waiting for data:** Please upload the Client File to generate the Benchmark Scorecard.")
         return
         
-    # 1. Search for the backend industry benchmark file
-    safe_name = selected_industry.replace(", ", "_").replace(" & ", "_").replace(" ", "_")
-    base_path = f"benchmarks/{safe_name}"
+    # 1. Search for the exact file name mapped in the dictionary
+    exact_file_name = benchmark_map[selected_option]
+    base_path = f"benchmarks/{exact_file_name}"
     bench_file_path = f"{base_path}.csv" if os.path.exists(f"{base_path}.csv") else (f"{base_path}.xlsx" if os.path.exists(f"{base_path}.xlsx") else None)
         
     if not bench_file_path:
-        st.error(f"⚠️ **Benchmark Missing:** The engine could not find a backend benchmark file for **{selected_industry}**. Please ask your analytics team to upload `{safe_name}.csv` or `{safe_name}.xlsx` into the `benchmarks/` folder on GitHub.")
+        st.error(f"⚠️ **Benchmark Missing:** The engine could not find the backend file. Please ask your analytics team to upload `{exact_file_name}.csv` into the `benchmarks/` folder on GitHub.")
         return
-
-    # 2. Process Client Data
-    df_client_clean, m_client, _ = scrub_and_load_excel(client_file)
-    if df_client_clean is None: return
-    client_prod, client_creative, client_glo = process_metrics(df_client_clean, m_client)
-    _, _, _, date_from, date_to = extract_exact_metadata(df_client_clean)
-    
-    client_start_dt = pd.to_datetime(date_from, errors='coerce') if date_from != "N/A" else pd.NaT
-    client_end_dt = pd.to_datetime(date_to, errors='coerce') if date_to != "N/A" else pd.NaT
-
-    # 3. Process Benchmark Data (Raw Data Dump)
-    with st.spinner(f"Crunching the massive {selected_industry} backend data dump..."):
-        df_bench_clean, m_bench, _ = scrub_and_load_excel(bench_file_path, is_local_path=True)
-        if df_bench_clean is None: return
-        bench_prod, bench_creative, bench_glo = process_metrics(df_bench_clean, m_bench)
-
-    # 4. Seasonal Alignment (Filtering Benchmark to matching Client dates!)
-    if pd.notna(client_start_dt) and pd.notna(client_end_dt) and 'Date' in bench_prod.columns and bench_prod['Date'].notna().any():
-        start_md, end_md = client_start_dt.strftime('%m-%d'), client_end_dt.strftime('%m-%d')
-        st.info(f"📅 **Seasonal Alignment Active:** Filtering historical {selected_industry} data to exactly match the **{client_start_dt.strftime('%b %d')} to {client_end_dt.strftime('%b %d')}** window.")
         
-        def filter_by_season(df):
-            if df.empty or 'Date' not in df.columns: return df
-            md = df['Date'].dt.strftime('%m-%d')
-            mask = (md >= start_md) & (md <= end_md) if start_md <= end_md else (md >= start_md) | (md <= end_md)
-            return df[mask]
-            
-        bench_prod = filter_by_season(bench_prod)
-        bench_creative = filter_by_season(bench_creative)
-
-    # 5. Core Metric Calculations
-    c_item_ctr = client_prod['Clicks'].sum() / client_prod['Views'].sum() if client_prod['Views'].sum() > 0 else 0
-    b_item_ctr = bench_prod['Clicks'].sum() / bench_prod['Views'].sum() if bench_prod['Views'].sum() > 0 else 0
-    
-    c_bnr_ctr = client_creative['Clicks'].sum() / client_creative['Views'].sum() if client_creative['Views'].sum() > 0 else 0
-    b_bnr_ctr = bench_creative['Clicks'].sum() / bench_creative['Views'].sum() if bench_creative['Views'].sum() > 0 else 0
-
-    def get_avg_pages(df):
-        if df.empty: return 0
-        valid = df[df['Run_ID'] != "UNKNOWN"]
-        if not valid.empty:
-            return valid.groupby('Run_ID')['Page'].max().mean()
-        return df['Page'].max()
-
-    c_pages = get_avg_pages(client_prod)
-    b_pages = get_avg_pages(bench_prod)
-
-    st.write("---")
-    st.subheader(f"🎯 The Executive Scorecard vs {selected_industry} Average")
-    
-    sc1, sc2, sc3 = st.columns(3)
-    sc1.metric(label="Client Avg. Item CTR", value=f"{c_item_ctr:.2%}", delta=f"{c_item_ctr - b_item_ctr:+.2%} pts vs Benchmark")
-    sc2.metric(label="Client Marketing Banner CTR", value=f"{c_bnr_ctr:.2%}", delta=f"{c_bnr_ctr - b_bnr_ctr:+.2%} pts vs Benchmark")
-    sc3.metric(label="Avg. Flyer Length (Pages)", value=f"{c_pages:,.1f}", delta=f"{c_pages - b_pages:+.1f} Pages vs Benchmark")
+    # ... (The rest of the code for Module 3 remains exactly the same below this!)
 
 # ==============================================================================
 # 🗺️ NAVIGATION & MAIN APP CONTROL

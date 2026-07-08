@@ -430,7 +430,7 @@ pipeline_mode = st.sidebar.radio(
     [
         "📁 Single Campaign Matrix", 
         "📊 Head-to-Head Variance", 
-        "🏆 Yearly Benchmark Scorecard (DNU - IN DEV)"
+        "🏆 Benchmark Scorecard (DNU - IN DEV)"
     ]
 )
 

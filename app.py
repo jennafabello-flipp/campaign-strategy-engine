@@ -254,9 +254,9 @@ def render_insight_box(what, so_what, now_what):
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🗂️ MODULE 1: SINGLE CAMPAIGN BREAKDOWN
+# 🗂️ MODULE 1: SINGLE CAMPAIGN MATRIX
 # ==============================================================================
-def render_single_campaign_breakdown():
+def render_single_campaign_matrix():
     st.markdown("<div class='main-header'>Single Campaign Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to map campaign performance.</div>", unsafe_allow_html=True)
     
@@ -403,9 +403,9 @@ def render_single_campaign_breakdown():
                     st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
-# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
+# 🗂️ MODULE 2: HEAD-TO-HEAD VARIANCE
 # ==============================================================================
-def render_head_to_head_comparison():
+def render_head_to_head_variance():
     st.markdown("<div class='main-header'>Head-to-Head Comparison</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Compare Period A (Base Year) against Period B (Variant Year) to calculate strategic growth deltas.</div>", unsafe_allow_html=True)
     
@@ -579,10 +579,10 @@ def render_head_to_head_comparison():
                 st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
 
 # ==============================================================================
-# 🏆 MODULE 3: INDUSTRY BENCHMARKs 
+# 🏆 MODULE 3: YEARLY BENCHMARK SCORECARD
 # ==============================================================================
-def render_industry_benchmarks():
-    st.markdown("<div class='main-header'>🏆 Industry Benchmarks</div>", unsafe_allow_html=True)
+def render_benchmark_scorecard():
+    st.markdown("<div class='main-header'>🏆 Industry Benchmarks (DNU - IN DEV)</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Compare a client's current flight directly against a historical industry baseline, aligned by season.</div>", unsafe_allow_html=True)
     
     # Placeholder for top-level export button
@@ -707,10 +707,9 @@ pipeline_mode = st.sidebar.radio(
     ]
 )
 
-# The engine still routes perfectly because it just looks for the keywords!
 if "Single Campaign" in pipeline_mode: 
     render_single_campaign_matrix()
 elif "Head-to-Head" in pipeline_mode: 
     render_head_to_head_variance()
-elif "Benchmark" in pipeline_mode: 
+elif "Industry Benchmarks" in pipeline_mode: 
     render_benchmark_scorecard()

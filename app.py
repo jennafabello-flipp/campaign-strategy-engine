@@ -425,7 +425,18 @@ def render_benchmark_scorecard():
 # 🗺️ NAVIGATION & MAIN APP CONTROL
 # ==============================================================================
 st.sidebar.markdown("<h2 style='color:#002551;'>🚀 Control Panel</h2>", unsafe_allow_html=True)
-pipeline_mode = st.sidebar.radio("Select Strategy Module:", ["📁 Single Campaign Matrix", "📊 Head-to-Head Variance", "🏆 Yearly Benchmark Scorecard"])
-if pipeline_mode == "📁 Single Campaign Matrix": render_single_campaign_matrix()
-elif pipeline_mode == "📊 Head-to-Head Variance": render_head_to_head_variance()
-elif pipeline_mode == "🏆 Yearly Benchmark Scorecard": render_benchmark_scorecard()
+pipeline_mode = st.sidebar.radio(
+    "Select Strategy Module:", 
+    [
+        "📁 Single Campaign Matrix", 
+        "📊 Head-to-Head Variance", 
+        "🏆 Yearly Benchmark Scorecard (DNU - IN DEV)"
+    ]
+)
+
+if pipeline_mode == "📁 Single Campaign Matrix": 
+    render_single_campaign_matrix()
+elif pipeline_mode == "📊 Head-to-Head Variance": 
+    render_head_to_head_variance()
+elif pipeline_mode == "🏆 Yearly Benchmark Scorecard (DNU - IN DEV)": 
+    render_benchmark_scorecard()

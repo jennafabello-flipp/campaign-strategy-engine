@@ -14,7 +14,7 @@ if not os.path.exists("benchmarks"):
 # 🚀 SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Enterprise Campaign Strategy Engine",
+    page_title="Campaign Strategy Engine",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"

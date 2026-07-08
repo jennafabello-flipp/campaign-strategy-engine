@@ -75,7 +75,7 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
         mapping = {
             'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
             'date': get_col(['Daily Available From', 'Date', 'Start Date']),
-            'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']), # NEW RUN ID CATCHER
+            'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
@@ -95,7 +95,7 @@ def process_metrics(df, m):
     df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] else 1
     df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
     df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') else pd.NaT
-    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN" # STORING RUN ID FOR PAGE AVERAGES
+    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN"
     
     def safe_numeric(col_name):
         if m[col_name] and m[col_name] in df.columns:
@@ -216,6 +216,32 @@ def process_scroll_file(scroll_file, period_name=None):
         
     if period_name: agg['Period'] = period_name
     return agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
+
+def generate_h2h_insight(gloA, gloB, cat_m_l1):
+    v_del = (gloB['views'] - gloA['views']) / gloA['views'] if gloA['views'] > 0 else 0
+    c_del = (gloB['clicks'] - gloA['clicks']) / gloA['clicks'] if gloA['clicks'] > 0 else 0
+    
+    dir_v = "an increase" if v_del > 0 else "a decline"
+    dir_c = "an increase" if c_del > 0 else "a decline"
+    what = f"The Variant campaign saw **{dir_v} of {abs(v_del):.1%}** in total views, driving **{dir_c} of {abs(c_del):.1%}** in item clicks compared to the Base."
+    
+    if v_del > 0 and c_del > v_del:
+        so_what = "Audience reach expanded, and engagement outpaced that growth. The assortment and pricing strategy were highly relevant to the newly acquired traffic."
+    elif v_del > 0 and c_del <= 0:
+        so_what = "Audience reach expanded, but overall engagement declined. This indicates traffic quality issues or an assortment that failed to resonate with the broader audience."
+    elif v_del < 0 and c_del > 0:
+        so_what = "Despite a smaller audience footprint, engagement actually increased. The traffic was highly qualified and the assortment was extremely relevant, but top-of-funnel reach needs addressing."
+    else:
+        so_what = "Both reach and engagement contracted. The flight experienced macro-level headwinds, requiring a review of both traffic acquisition and merchandising strategy."
+        
+    cat_m_l1['Efficiency'] = cat_m_l1['Alloc Variant %'] - cat_m_l1['Alloc Base %']
+    if not cat_m_l1.empty:
+        top_cat = cat_m_l1.loc[cat_m_l1['Allocation Shift'].idxmax()]['L1_Category']
+        now_what = f"**1. Reallocate Space:** The '{top_cat}' category saw the highest positive shift in user click share. Consider increasing its footprint in the next flyer.<br>**2. Audit Product Churn:** Review the 'YoY Assortment Turnover' table below to verify if the newly introduced SKUs actually outperformed the items retired from the Base year."
+    else:
+        now_what = "Review the 'YoY Assortment Turnover' to verify if the newly introduced SKUs actually outperformed the retired items."
+        
+    return what, so_what, now_what
 
 def render_insight_box(what, so_what, now_what):
     st.markdown(f"""
@@ -357,8 +383,12 @@ def render_head_to_head_variance():
     st.markdown("<div class='sub-header'>Compare Period A (Base Year) against Period B (Variant Year) to calculate strategic growth deltas.</div>", unsafe_allow_html=True)
     
     colA, colB = st.columns(2)
-    with colA: file_A = st.file_uploader("📁 Period A: Base File (Control Year)", type=["xlsx", "csv"])
-    with colB: file_B = st.file_uploader("📁 Period B: Variant File (Test Year)", type=["xlsx", "csv"])
+    with colA: 
+        file_A = st.file_uploader("📁 Period A: Base File (Control Year)", type=["xlsx", "csv"])
+        scroll_A = st.file_uploader("📉 Period A: Scroll Depth File [Optional]", type=["xlsx", "csv"])
+    with colB: 
+        file_B = st.file_uploader("📁 Period B: Variant File (Test Year)", type=["xlsx", "csv"])
+        scroll_B = st.file_uploader("📉 Period B: Scroll Depth File [Optional]", type=["xlsx", "csv"])
     
     if not file_A or not file_B:
         st.warning("⚠️ **Waiting for data:** Please upload BOTH the Base File and the Variant File to generate the comparison matrix.")
@@ -371,7 +401,159 @@ def render_head_to_head_variance():
         dfA_prod, _, gloA = process_metrics(dfA_clean, mA)
         dfB_prod, _, gloB = process_metrics(dfB_clean, mB)
         
-        st.success("✅ Head-to-Head successfully processed. (Run Single Campaign or Benchmark scorecard to see expanded analytics!)")
+        _, rA, _, dA_from, dA_to = extract_exact_metadata(dfA_clean)
+        _, rB, _, dB_from, dB_to = extract_exact_metadata(dfB_clean)
+        
+        st.info(f"⚖️ **COMPARING:** {rA} ({dA_from} to {dA_to}) **VERSUS** {rB} ({dB_from} to {dB_to})")
+        
+        def build_shift_matrix(col_name):
+            catA = dfA_prod.groupby(col_name).agg(CntA=('SKU', 'count'), ClkA=('Clicks', 'sum')).reset_index()
+            catA['Alloc Base %'] = catA['CntA'] / catA['CntA'].sum() if catA['CntA'].sum() > 0 else 0
+            catB = dfB_prod.groupby(col_name).agg(CntB=('SKU', 'count'), ClkB=('Clicks', 'sum')).reset_index()
+            catB['Alloc Variant %'] = catB['CntB'] / catB['CntB'].sum() if catB['CntB'].sum() > 0 else 0
+            cat_m = pd.merge(catA[[col_name, 'Alloc Base %']], catB[[col_name, 'Alloc Variant %']], on=col_name, how='outer').fillna(0)
+            cat_m['Allocation Shift'] = cat_m['Alloc Variant %'] - cat_m['Alloc Base %']
+            return cat_m
+            
+        cat_m_l1 = build_shift_matrix('L1_Category')
+        cat_m_l2 = build_shift_matrix('L2_Category')
+        cat_m_l3 = build_shift_matrix('L3_Category')
+
+        w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m_l1)
+        render_insight_box(w, sw, nw)
+        
+        def calc_delta(base, var): return 1.0 if base == 0 and var > 0 else (0.0 if base == 0 else (var - base) / base)
+
+        st.write("---")
+        st.subheader("🎯 Slot 1: Macro Funnel Delta")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("TOTAL VIEWS", f"{gloB['views']:,.0f}", f"{calc_delta(gloA['views'], gloB['views']):.1%}")
+        c2.metric("TOTAL CLICKS", f"{gloB['clicks']:,.0f}", f"{calc_delta(gloA['clicks'], gloB['clicks']):.1%}")
+        c3.metric("ADD TO LISTS", f"{gloB['clips']:,.0f}", f"{calc_delta(gloA['clips'], gloB['clips']):.1%}")
+        c4.metric("TOTAL TTMS", f"{gloB['ttms']:,.0f}", f"{calc_delta(gloA['ttms'], gloB['ttms']):.1%}")
+        ctrA, ctrB = (gloA['clicks']/gloA['views'] if gloA['views'] > 0 else 0), (gloB['clicks']/gloB['views'] if gloB['views'] > 0 else 0)
+        c5.metric("GLOBAL ITEM CTR", f"{ctrB:.2%}", f"{ctrB - ctrA:+.2%} pts")
+
+        st.write("---")
+        st.subheader("🏬 Slot 2: Brand Momentum Winners & Losers")
+        brA, brB = dfA_prod.groupby('Brand')[['Views', 'Clicks', 'TTMs']].sum().reset_index(), dfB_prod.groupby('Brand')[['Views', 'Clicks', 'TTMs']].sum().reset_index()
+        br_merge = pd.merge(brA, brB, on='Brand', suffixes=(' Base', ' Variant'), how='outer').fillna(0)
+        br_merge['TTM Growth %'] = np.where(br_merge['TTMs Base'] > 0, (br_merge['TTMs Variant'] - br_merge['TTMs Base']) / br_merge['TTMs Base'], np.where(br_merge['TTMs Variant'] > 0, 1.0, 0.0))
+        br_merge['Click Growth %'] = np.where(br_merge['Clicks Base'] > 0, (br_merge['Clicks Variant'] - br_merge['Clicks Base']) / br_merge['Clicks Base'], np.where(br_merge['Clicks Variant'] > 0, 1.0, 0.0))
+        st.dataframe(br_merge[['Brand', 'TTMs Base', 'TTMs Variant', 'TTM Growth %', 'Clicks Base', 'Clicks Variant', 'Click Growth %']].sort_values(by='TTM Growth %', ascending=False).style.format({'TTMs Base': '{:,.0f}', 'TTMs Variant': '{:,.0f}', 'Clicks Base': '{:,.0f}', 'Clicks Variant': '{:,.0f}', 'TTM Growth %': '{:+.1%}', 'Click Growth %': '{:+.1%}'}), use_container_width=True, hide_index=True)
+
+        st.write("---")
+        st.subheader("📊 Slot 3: Category Share Shifts")
+        tab_h2h_l1, tab_h2h_l2, tab_h2h_l3 = st.tabs(["L1 Primary Category Shifts", "L2 Subcategory Shifts", "L3 Sub-subcategory Shifts"])
+        with tab_h2h_l1:
+            st.dataframe(cat_m_l1.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+        with tab_h2h_l2:
+            st.dataframe(cat_m_l2.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+        with tab_h2h_l3:
+            st.dataframe(cat_m_l3.sort_values(by='Allocation Shift', ascending=False).style.format({'Alloc Base %': '{:.1%}', 'Alloc Variant %': '{:.1%}', 'Allocation Shift': '{:+.2%} pts'}), use_container_width=True, hide_index=True)
+
+        st.write("---")
+        st.subheader("🏆 Slot 4: Shared SKU Micro-Delta")
+        st.markdown("<small>Isolates items that appeared in BOTH campaigns to measure direct performance changes.</small>", unsafe_allow_html=True)
+        skA = dfA_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
+        skB = dfB_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
+        sk_m = pd.merge(skA, skB, on='SKU', suffixes=(' Base', ' Variant'), how='inner')
+        
+        if not sk_m.empty:
+            sk_m['CTR Base'] = np.where(sk_m['Views Base'] > 0, sk_m['Clicks Base'] / sk_m['Views Base'], 0)
+            sk_m['CTR Variant'] = np.where(sk_m['Views Variant'] > 0, sk_m['Clicks Variant'] / sk_m['Views Variant'], 0)
+            sk_m['CTR Shift'] = sk_m['CTR Variant'] - sk_m['CTR Base']
+            sk_m['Price Shift'] = sk_m['Curr_Price Variant'] - sk_m['Curr_Price Base']
+            
+            final_sk = sk_m[['SKU', 'Name Variant', 'Views Variant', 'Clicks Variant', 'CTR Base', 'CTR Variant', 'CTR Shift', 'Price Shift']].copy()
+            final_sk.rename(columns={'Name Variant': 'Name'}, inplace=True)
+            
+            st.dataframe(final_sk.sort_values(by='CTR Shift', ascending=False).style.format({
+                'Views Variant': '{:,.0f}', 'Clicks Variant': '{:,.0f}', 'CTR Base': '{:.2%}', 'CTR Variant': '{:.2%}', 
+                'CTR Shift': '{:+.2%} pts', 'Price Shift': '${:+.2f}'
+            }), use_container_width=True, hide_index=True)
+        else:
+            final_sk = pd.DataFrame()
+            st.info("No shared SKUs detected between these two flights.")
+            
+        st.write("---")
+        st.subheader("🔄 Slot 5: YoY Assortment Turnover")
+        col_new, col_ret = st.columns(2)
+        with col_new:
+            st.markdown("**Top New Items**")
+            new_skus = dfB_prod[~dfB_prod['SKU'].isin(dfA_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+            new_skus['Item CTR'] = np.where(new_skus['Views'] > 0, new_skus['Clicks'] / new_skus['Views'], 0)
+            if not new_skus.empty:
+                st.dataframe(new_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            else:
+                new_skus = pd.DataFrame()
+                st.caption("No new items.")
+                
+        with col_ret:
+            st.markdown("**Top Retired Items**")
+            ret_skus = dfA_prod[~dfA_prod['SKU'].isin(dfB_prod['SKU'])].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+            ret_skus['Item CTR'] = np.where(ret_skus['Views'] > 0, ret_skus['Clicks'] / ret_skus['Views'], 0)
+            if not ret_skus.empty:
+                st.dataframe(ret_skus.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            else:
+                ret_skus = pd.DataFrame()
+                st.caption("No items retired.")
+
+        st.write("---")
+        st.subheader("💰 Slot 6: YoY Pricing & Promotional Shift")
+        for d in [dfA_prod, dfB_prod]: 
+            d['Price_Tier'] = pd.cut(d['Curr_Price'], bins=[0, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
+            d['Discount_Tier'] = pd.cut(d['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
+        
+        pA, pB = dfA_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})
+        p_merge = pd.merge(pA, pB, on='Price_Tier').fillna(0)
+        p_merge['Click Share Shift'] = (p_merge['Variant Clicks'] / p_merge['Variant Clicks'].sum()) - (p_merge['Base Clicks'] / p_merge['Base Clicks'].sum())
+        
+        dA, dB = dfA_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})
+        d_merge = pd.merge(dA, dB, on='Discount_Tier').fillna(0)
+        d_merge['Click Share Shift'] = (d_merge['Variant Clicks'] / d_merge['Variant Clicks'].sum()) - (d_merge['Base Clicks'] / d_merge['Base Clicks'].sum())
+        
+        c_p, c_d = st.columns(2)
+        with c_p: st.dataframe(p_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
+        with c_d: st.dataframe(d_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
+
+        if scroll_A and scroll_B:
+            st.write("---")
+            st.subheader("📉 Slot 7: YoY Audience Scroll Retention")
+            try:
+                df_scA, df_scB = process_scroll_file(scroll_A, 'Base Year (Period A)'), process_scroll_file(scroll_B, 'Variant Year (Period B)')
+                sc_col1, sc_col2 = st.columns([1, 2])
+                with sc_col1:
+                    tbl_merge = pd.merge(df_scA[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Base % Read', 'Approx Page': 'Base Page'}), df_scB[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Variant % Read', 'Approx Page': 'Variant Page'}), on='Milestone', how='outer').rename(columns={'Milestone': 'Scroll Depth'})
+                    tbl_merge['Approx Page'] = tbl_merge['Variant Page'].combine_first(tbl_merge['Base Page'])
+                    st.dataframe(tbl_merge[['Scroll Depth', 'Base % Read', 'Variant % Read', 'Approx Page']].style.format({'Base % Read': '{:.1%}', 'Variant % Read': '{:.1%}'}), use_container_width=True, hide_index=True)
+                with sc_col2:
+                    st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
+            except Exception as e: st.warning(f"Could not process scroll files. Error: {str(e)}")
+            
+        # 📥 NEW: EXPORT TO EXCEL BUTTON
+        st.write("---")
+        st.markdown("### 📥 Export Variance Report")
+        st.markdown("Download all the raw data tables from this comparison into a single, multi-tab Excel file.")
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            br_merge.to_excel(writer, sheet_name='Brand Momentum', index=False)
+            cat_m_l1.to_excel(writer, sheet_name='L1 Category Shifts', index=False)
+            cat_m_l2.to_excel(writer, sheet_name='L2 Category Shifts', index=False)
+            if not sk_m.empty: final_sk.to_excel(writer, sheet_name='Shared SKUs Delta', index=False)
+            if not new_skus.empty: new_skus.to_excel(writer, sheet_name='New SKUs', index=False)
+            if not ret_skus.empty: ret_skus.to_excel(writer, sheet_name='Retired SKUs', index=False)
+            p_merge.to_excel(writer, sheet_name='Price Shifts', index=False)
+            d_merge.to_excel(writer, sheet_name='Discount Shifts', index=False)
+            
+        output.seek(0)
+        st.download_button(
+            label="⬇️ Download Full H2H Variance Report (.xlsx)",
+            data=output,
+            file_name=f"H2H_Variance_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ==============================================================================
 # 🏆 MODULE 3: YEARLY BENCHMARK SCORECARD
@@ -384,7 +566,6 @@ def render_benchmark_scorecard():
     with colA:
         client_file = st.file_uploader("📁 Upload Client File (Current Campaign)", type=["xlsx", "csv"])
     with colB:
-        # 🧠 THE NEW DICTIONARY: Pretty Dropdown Name -> Exact File Name
         benchmark_map = {
             "🛒 Grocery (Core: Jan-Oct)": "Grocery_Core",
             "🎄 Grocery (Holiday: Nov-Dec)": "Grocery_Holiday",
@@ -410,7 +591,6 @@ def render_benchmark_scorecard():
         st.warning("⚠️ **Waiting for data:** Please upload the Client File to generate the Benchmark Scorecard.")
         return
         
-    # 1. Search for the exact file name mapped in the dictionary
     exact_file_name = benchmark_map[selected_option]
     base_path = f"benchmarks/{exact_file_name}"
     bench_file_path = f"{base_path}.csv" if os.path.exists(f"{base_path}.csv") else (f"{base_path}.xlsx" if os.path.exists(f"{base_path}.xlsx") else None)
@@ -418,8 +598,56 @@ def render_benchmark_scorecard():
     if not bench_file_path:
         st.error(f"⚠️ **Benchmark Missing:** The engine could not find the backend file. Please ask your analytics team to upload `{exact_file_name}.csv` into the `benchmarks/` folder on GitHub.")
         return
+
+    df_client_clean, m_client, _ = scrub_and_load_excel(client_file)
+    if df_client_clean is None: return
+    client_prod, client_creative, client_glo = process_metrics(df_client_clean, m_client)
+    _, _, _, date_from, date_to = extract_exact_metadata(df_client_clean)
+    
+    client_start_dt = pd.to_datetime(date_from, errors='coerce') if date_from != "N/A" else pd.NaT
+    client_end_dt = pd.to_datetime(date_to, errors='coerce') if date_to != "N/A" else pd.NaT
+
+    with st.spinner(f"Crunching the massive backend data dump..."):
+        df_bench_clean, m_bench, _ = scrub_and_load_excel(bench_file_path, is_local_path=True)
+        if df_bench_clean is None: return
+        bench_prod, bench_creative, bench_glo = process_metrics(df_bench_clean, m_bench)
+
+    if pd.notna(client_start_dt) and pd.notna(client_end_dt) and 'Date' in bench_prod.columns and bench_prod['Date'].notna().any():
+        start_md, end_md = client_start_dt.strftime('%m-%d'), client_end_dt.strftime('%m-%d')
+        st.info(f"📅 **Seasonal Alignment Active:** Filtering historical data to exactly match the **{client_start_dt.strftime('%b %d')} to {client_end_dt.strftime('%b %d')}** window.")
         
-    # ... (The rest of the code for Module 3 remains exactly the same below this!)
+        def filter_by_season(df):
+            if df.empty or 'Date' not in df.columns: return df
+            md = df['Date'].dt.strftime('%m-%d')
+            mask = (md >= start_md) & (md <= end_md) if start_md <= end_md else (md >= start_md) | (md <= end_md)
+            return df[mask]
+            
+        bench_prod = filter_by_season(bench_prod)
+        bench_creative = filter_by_season(bench_creative)
+
+    c_item_ctr = client_prod['Clicks'].sum() / client_prod['Views'].sum() if client_prod['Views'].sum() > 0 else 0
+    b_item_ctr = bench_prod['Clicks'].sum() / bench_prod['Views'].sum() if bench_prod['Views'].sum() > 0 else 0
+    
+    c_bnr_ctr = client_creative['Clicks'].sum() / client_creative['Views'].sum() if client_creative['Views'].sum() > 0 else 0
+    b_bnr_ctr = bench_creative['Clicks'].sum() / bench_creative['Views'].sum() if bench_creative['Views'].sum() > 0 else 0
+
+    def get_avg_pages(df):
+        if df.empty: return 0
+        valid = df[df['Run_ID'] != "UNKNOWN"]
+        if not valid.empty:
+            return valid.groupby('Run_ID')['Page'].max().mean()
+        return df['Page'].max()
+
+    c_pages = get_avg_pages(client_prod)
+    b_pages = get_avg_pages(bench_prod)
+
+    st.write("---")
+    st.subheader(f"🎯 The Executive Scorecard vs Industry Average")
+    
+    sc1, sc2, sc3 = st.columns(3)
+    sc1.metric(label="Client Avg. Item CTR", value=f"{c_item_ctr:.2%}", delta=f"{c_item_ctr - b_item_ctr:+.2%} pts vs Benchmark")
+    sc2.metric(label="Client Marketing Banner CTR", value=f"{c_bnr_ctr:.2%}", delta=f"{c_bnr_ctr - b_bnr_ctr:+.2%} pts vs Benchmark")
+    sc3.metric(label="Avg. Flyer Length (Pages)", value=f"{c_pages:,.1f}", delta=f"{c_pages - b_pages:+.1f} Pages vs Benchmark")
 
 # ==============================================================================
 # 🗺️ NAVIGATION & MAIN APP CONTROL
@@ -430,7 +658,7 @@ pipeline_mode = st.sidebar.radio(
     [
         "📁 Single Campaign Matrix", 
         "📊 Head-to-Head Variance", 
-        "🏆 Benchmark Scorecard (DNU - IN DEV)"
+        "🏆 Yearly Benchmark Scorecard (DNU - IN DEV)"
     ]
 )
 

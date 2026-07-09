@@ -14,7 +14,7 @@ if not os.path.exists("benchmarks"):
 # 🚀 SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Campaign Strategy Engine",
+    page_title="Enterprise Campaign Strategy Engine",
     page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -254,7 +254,7 @@ def render_insight_box(what, so_what, now_what):
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🗂️ MODULE 1: SINGLE CAMPAIGN MATRIX
+# 🗂️ MODULE 1: SINGLE CAMPAIGN BREAKDOWN
 # ==============================================================================
 def render_single_campaign_matrix():
     st.markdown("<div class='main-header'>Single Campaign Breakdown</div>", unsafe_allow_html=True)
@@ -299,8 +299,16 @@ def render_single_campaign_matrix():
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
+            # THE FIX: Added Share Calculations for the Excel Export and Dashboard display
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            p_agg['Click Share %'] = p_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
+            p_agg['List Share %'] = p_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
+            p_agg['TTM Share %'] = p_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
+
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            d_agg['Click Share %'] = d_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
+            d_agg['List Share %'] = d_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
+            d_agg['TTM Share %'] = d_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
             
             df_sc_table = pd.DataFrame()
             if scroll_file:
@@ -403,7 +411,7 @@ def render_single_campaign_matrix():
                     st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
-# 🗂️ MODULE 2: HEAD-TO-HEAD VARIANCE
+# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
 # ==============================================================================
 def render_head_to_head_variance():
     st.markdown("<div class='main-header'>Head-to-Head Comparison</div>", unsafe_allow_html=True)
@@ -507,9 +515,9 @@ def render_head_to_head_variance():
             
         output.seek(0)
         dl_placeholder.download_button(
-            label="⬇️ Download H2H Variance Report (.xlsx)",
+            label="⬇️ Download H2H Comparison Report (.xlsx)",
             data=output,
-            file_name=f"H2H_Variance_Report.xlsx",
+            file_name=f"H2H_Comparison_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
@@ -579,7 +587,7 @@ def render_head_to_head_variance():
                 st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
 
 # ==============================================================================
-# 🏆 MODULE 3: YEARLY BENCHMARK SCORECARD
+# 🏆 MODULE 3: INDUSTRY BENCHMARKS
 # ==============================================================================
 def render_benchmark_scorecard():
     st.markdown("<div class='main-header'>🏆 Industry Benchmarks (DNU - IN DEV)</div>", unsafe_allow_html=True)

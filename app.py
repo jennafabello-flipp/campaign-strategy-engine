@@ -191,11 +191,11 @@ def process_scroll_file(scroll_file, period_name=None):
     df_sc.columns = [str(c).strip() for c in df_sc.columns]
     cols_lower = [c.lower() for c in df_sc.columns]
     
-    # NEW: Strictly prioritize Flyer Run Name or Flyer Run ID for the QBR breakout
+    # Priority identifiers for breakout
     id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
     if not id_col:
         id_col = next((c for c in df_sc.columns if 'flyer run id' in c.lower()), None)
-    if not id_col: # Fallback just in case
+    if not id_col: 
         id_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['date', 'run', 'campaign', 'week', 'title'])), None)
     
     weekly_data = None
@@ -219,15 +219,16 @@ def process_scroll_file(scroll_file, period_name=None):
             agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
         
-        # 2. QBR Weekly Analysis (If multiple weeks exist based on Flyer Run Name/ID)
+        # 2. QBR Weekly Analysis - THE FIX
         if id_col and df_sc[id_col].nunique() > 1:
             week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum'}).reset_index()
             week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
             weekly_data = week_agg.rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
             
-            # Find the top performing week based on average overall retention
-            week_avg = week_agg.groupby(id_col)['Retention'].mean()
-            top_week_name = week_avg.idxmax()
+            # Using 'sum' instead of 'mean' calculates Area Under the Curve (Avg Pages Read Per User)
+            # This mathematically penalizes 1-page flyers and rewards deep retention on longer flyers.
+            week_score = week_agg.groupby(id_col)['Retention'].sum()
+            top_week_name = week_score.idxmax()
 
     else:
         df_sc = df_sc.iloc[:, :3]
@@ -441,7 +442,7 @@ def render_single_campaign_matrix():
         st.subheader("📉 Audience Scroll Retention & Drop-off")
         
         if top_week:
-            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks in your data. The top performing flight for average audience scroll retention was **{top_week}**.")
+            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks in your data. Factoring in both retention rate and total pages, the top performing flight for overall audience scroll volume was **{top_week}**.")
             
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:

@@ -191,7 +191,6 @@ def process_scroll_file(scroll_file, period_name=None):
     df_sc.columns = [str(c).strip() for c in df_sc.columns]
     cols_lower = [c.lower() for c in df_sc.columns]
     
-    # NEW FIX: Custom sorter to ensure alphabetical percentage ranges sort correctly
     def get_sort_val(x):
         s = str(x).lower()
         if 'open' in s: return -1
@@ -199,7 +198,6 @@ def process_scroll_file(scroll_file, period_name=None):
         nums = re.findall(r'\d+', s)
         return float(nums[0]) if nums else 999
 
-    # Priority identifiers for breakout
     id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
     if not id_col:
         id_col = next((c for c in df_sc.columns if 'flyer run id' in c.lower()), None)
@@ -216,7 +214,6 @@ def process_scroll_file(scroll_file, period_name=None):
         if pr_col: df_sc[pr_col] = pd.to_numeric(df_sc[pr_col], errors='coerce').fillna(0)
         df_sc['sort_val'] = df_sc[sd_col].apply(get_sort_val)
         
-        # 1. Overall Aggregation
         agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
         agg['Retention'] = np.where(agg[tr_col] > 0, agg[cr_col] / agg[tr_col], 0)
         agg = agg.sort_values('sort_val')
@@ -225,21 +222,18 @@ def process_scroll_file(scroll_file, period_name=None):
         else: agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
         
-        # 2. QBR Weekly Analysis
         if id_col and df_sc[id_col].nunique() > 1:
             week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
             week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
             weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
             
-            # Using 'sum' calculates Area Under the Curve (Avg Pages Read Per User)
             week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
             top_week_name = week_score.idxmax()
             top_week_score = week_score.max()
 
-            # Find the stark drop-off point for the winning week
             top_data = weekly_data[weekly_data['Campaign/Week'] == top_week_name].copy()
-            top_data['Drop'] = top_data['Retention'].diff() # Calculates current step minus previous step
-            steepest_idx = top_data['Drop'].idxmin() # idxmin finds the largest negative drop
+            top_data['Drop'] = top_data['Retention'].diff()
+            steepest_idx = top_data['Drop'].idxmin()
             
             if pd.notna(steepest_idx):
                 drop_milestone = top_data.loc[steepest_idx, 'Milestone']
@@ -342,7 +336,6 @@ def render_single_campaign_matrix():
                 c_agg['Item Allocation %'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
                 c_agg['Click Share %'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
                 return c_agg
-
             cat_l1_agg, cat_l2_agg, cat_l3_agg = build_cat_agg('L1_Category'), build_cat_agg('L2_Category'), build_cat_agg('L3_Category')
             
             brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
@@ -467,12 +460,12 @@ def render_single_campaign_matrix():
         st.subheader("📉 Audience Scroll Retention & Drop-off")
         
         if qbr_insights:
-            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks. The top performing flight was **{qbr_insights['top_week']}**.")
+            st.success(f"🌟 **Insight:** The engine detected multiple campaigns/weeks. The top performing flight was **{qbr_insights['top_week']}**.")
             st.markdown(f"""
-            * **Why did it win?** It achieved an 'Area Under the Curve' score of **{qbr_insights['score']:.2f}**.
+            * **Why did it win?** It successfully retained the highest volume of users across the deepest portion of the flyer.
             * **Key Friction Point:** For this winning week, the most stark audience drop-off (losing **{qbr_insights['drop_amt']:.1%}** of remaining readers) didn't happen until the **{qbr_insights['drop_milestone']}** mark, keeping users highly engaged early on.
             """)
-            st.markdown("<small>ℹ️ <b>How is this scored?</b> We use 'Area Under the Curve' (the sum of retention percentages across all milestones). This mathematically rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero actual depth.</small>", unsafe_allow_html=True)
+            st.markdown(f"<small>ℹ️ <b>How is this scored? (Score: {qbr_insights['score']:.2f})</b> We use 'Area Under the Curve' (the sum of retention percentages across all milestones). This mathematically rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero actual depth.</small>", unsafe_allow_html=True)
             
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:
@@ -483,7 +476,13 @@ def render_single_campaign_matrix():
                 fig = px.line(weekly_scroll, x='Milestone', y='Retention', color='Campaign/Week', markers=True, title="Variance by Campaign/Week")
             else:
                 fig = px.line(df_sc_table, x='Scroll Depth', y='% of Users Read', markers=True, color_discrete_sequence=['#0054B7'])
-            fig.update_layout(yaxis=dict(tickformat='.0%', range=[0,1]))
+            
+            # The Fix: Force Plotly to respect the exact order of the milestones from the pre-sorted table
+            ordered_milestones = df_sc_table['Scroll Depth'].tolist()
+            fig.update_layout(
+                xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
+                yaxis=dict(tickformat='.0%', range=[0,1])
+            )
             st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
@@ -668,7 +667,15 @@ def render_head_to_head_variance():
         with sc_col2:
             df_scA = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Base % Read'], 'Period': 'Base Year'})
             df_scB = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Variant % Read'], 'Period': 'Variant Year'})
-            st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
+            fig = px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
+            
+            # The Fix: Force Plotly to respect the exact order of the milestones from the pre-sorted table
+            ordered_milestones = tbl_merge['Scroll Depth'].tolist()
+            fig.update_layout(
+                xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
+                yaxis=dict(tickformat='.0%', range=[0,1])
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS
@@ -803,3 +810,4 @@ elif "Head-to-Head" in pipeline_mode:
     render_head_to_head_variance()
 elif "Industry Benchmarks" in pipeline_mode: 
     render_benchmark_scorecard()
+     

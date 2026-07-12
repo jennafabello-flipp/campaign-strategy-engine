@@ -191,11 +191,23 @@ def process_scroll_file(scroll_file, period_name=None):
     df_sc.columns = [str(c).strip() for c in df_sc.columns]
     cols_lower = [c.lower() for c in df_sc.columns]
     
+    # NEW: Strictly prioritize Flyer Run Name or Flyer Run ID for the QBR breakout
+    id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
+    if not id_col:
+        id_col = next((c for c in df_sc.columns if 'flyer run id' in c.lower()), None)
+    if not id_col: # Fallback just in case
+        id_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['date', 'run', 'campaign', 'week', 'title'])), None)
+    
+    weekly_data = None
+    top_week_name = None
+
     if 'scroll depth' in cols_lower and 'cumulative readers' in cols_lower and 'total readers' in cols_lower:
         get_exact = lambda name: next((c for c in df_sc.columns if c.lower() == name), None)
         sd_col, pr_col, cr_col, tr_col = get_exact('scroll depth'), get_exact('pages read'), get_exact('cumulative readers'), get_exact('total readers')
         
         if pr_col: df_sc[pr_col] = pd.to_numeric(df_sc[pr_col], errors='coerce').fillna(0)
+        
+        # 1. Overall Aggregation
         agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum'}).reset_index()
         agg['Retention'] = np.where(agg[tr_col] > 0, agg[cr_col] / agg[tr_col], 0)
         
@@ -206,6 +218,17 @@ def process_scroll_file(scroll_file, period_name=None):
             agg = agg.sort_values('Retention', ascending=False)
             agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
+        
+        # 2. QBR Weekly Analysis (If multiple weeks exist based on Flyer Run Name/ID)
+        if id_col and df_sc[id_col].nunique() > 1:
+            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum'}).reset_index()
+            week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
+            weekly_data = week_agg.rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
+            
+            # Find the top performing week based on average overall retention
+            week_avg = week_agg.groupby(id_col)['Retention'].mean()
+            top_week_name = week_avg.idxmax()
+
     else:
         df_sc = df_sc.iloc[:, :3]
         df_sc.columns = ['Milestone', 'Readers', 'Retention']
@@ -215,7 +238,9 @@ def process_scroll_file(scroll_file, period_name=None):
         agg['Approx Page'] = "N/A"
         
     if period_name: agg['Period'] = period_name
-    return agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
+    
+    final_df = agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
+    return final_df, weekly_data, top_week_name
 
 def generate_h2h_insight(gloA, gloB, cat_m_l1):
     v_del = (gloB['views'] - gloA['views']) / gloA['views'] if gloA['views'] > 0 else 0
@@ -258,22 +283,31 @@ def render_insight_box(what, so_what, now_what):
 # ==============================================================================
 def render_single_campaign_matrix():
     st.markdown("<div class='main-header'>Single Campaign Breakdown</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload raw exports directly to map campaign performance.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload raw exports directly to map campaign performance. Files can be processed together or independently.</div>", unsafe_allow_html=True)
     
-    # Placeholders for top-level export button
     dl_placeholder = st.empty()
     
     col1, col2 = st.columns(2)
-    with col1: merch_file = st.file_uploader("Upload Merchandise Performance File (.xlsx/.csv)", type=["xlsx", "csv"])
-    with col2: scroll_file = st.file_uploader("Upload Scroll Depth File [Optional] (.xlsx/.csv)", type=["xlsx", "csv"])
+    with col1: merch_file = st.file_uploader("📁 Upload Merchandise File (.xlsx/.csv)", type=["xlsx", "csv"])
+    with col2: scroll_file = st.file_uploader("📉 Upload Scroll Depth File (.xlsx/.csv)", type=["xlsx", "csv"])
         
+    if not merch_file and not scroll_file:
+        st.info("⚠️ **Waiting for data:** Please upload a Merchandise file, a Scroll Depth file, or both to begin analysis.")
+        return
+
+    # Initialize empty tables for safe Excel Export
+    pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = pd.DataFrame()
+    df_sc_table = pd.DataFrame()
+    weekly_scroll = pd.DataFrame()
+    top_week = None
+
+    # --- 1. PROCESS MERCHANDISE DATA (IF UPLOADED) ---
     if merch_file:
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
         if df_clean is not None:
             df_prod, df_creative, global_totals = process_metrics(df_clean, m)
             merchant, run_name, run_id, date_from, date_to = extract_exact_metadata(df_clean)
             
-            # --- DATA CRUNCHING (Done first so we can export it!) ---
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
             
@@ -290,7 +324,6 @@ def render_single_campaign_matrix():
             brand_agg['List Share %'] = brand_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             brand_agg['TTM Share %'] = brand_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
             
-            cr_agg = pd.DataFrame()
             if not df_creative.empty:
                 cr_agg = df_creative.groupby('Name').agg(Page=('Page','max'), Views=('Views','sum'), Clicks=('Clicks','sum')).reset_index()
                 cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
@@ -299,7 +332,6 @@ def render_single_campaign_matrix():
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
-            # THE FIX: Added Share Calculations for the Excel Export and Dashboard display
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             p_agg['Click Share %'] = p_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             p_agg['List Share %'] = p_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
@@ -309,106 +341,119 @@ def render_single_campaign_matrix():
             d_agg['Click Share %'] = d_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             d_agg['List Share %'] = d_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             d_agg['TTM Share %'] = d_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
-            
-            df_sc_table = pd.DataFrame()
-            if scroll_file:
-                try:
-                    df_sc_raw = process_scroll_file(scroll_file)
-                    df_sc_table = df_sc_raw.copy().rename(columns={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
-                except:
-                    pass
 
-            # --- GENERATE EXCEL AND INJECT INTO TOP PLACEHOLDER ---
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                pivot_top.sort_values(by='Item CTR', ascending=False).head(50).to_excel(writer, sheet_name='Top Items', index=False)
-                cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
-                cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
-                cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
-                brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
-                if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
-                p_agg.to_excel(writer, sheet_name='Price Bands', index=False)
-                d_agg.to_excel(writer, sheet_name='Discount Bands', index=False)
-                if not df_sc_table.empty: df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
-            output.seek(0)
-            
-            dl_placeholder.download_button(
-                label="⬇️ Download Single Campaign Data (.xlsx)",
-                data=output,
-                file_name=f"Single_Campaign_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    # --- 2. PROCESS SCROLL DATA (IF UPLOADED) ---
+    if scroll_file:
+        try:
+            df_sc_raw, weekly_scroll, top_week = process_scroll_file(scroll_file)
+            df_sc_table = df_sc_raw.copy().rename(columns={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
+        except Exception as e:
+            st.warning(f"Could not process the scroll file. Error: {str(e)}")
 
-            # --- RENDER UI ---
-            st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
-            
-            top_cat = df_prod.groupby('L1_Category')['Clicks'].sum().idxmax() if not df_prod.empty else "General Merchandise"
-            top_brand = df_prod.groupby('Brand')['Clicks'].sum().idxmax() if not df_prod.empty else "UNKNOWN"
-            render_insight_box(
-                f"The campaign generated **{global_totals['views']:,.0f} views** and **{global_totals['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(global_totals['clicks']/global_totals['views']) if global_totals['views']>0 else 0:.2%}**.",
-                f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity.",
-                f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 CTR items to identify high-performing assets that can be repurposed in future creative."
-            )
-            
-            v_tot, cl_tot, cp_tot, t_tot = global_totals['views'], global_totals['clicks'], global_totals['clips'], global_totals['ttms']
-            ctr_global_display = f"{cl_tot/v_tot:.2%}" if v_tot > 0 else "0.00%"
-            
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.markdown(f"<div class='metric-card'><div class='metric-val'>{v_tot:,.0f}</div><div class='metric-lbl'>TOTAL VIEWS</div></div>", unsafe_allow_html=True)
-            c2.markdown(f"<div class='metric-card'><div class='metric-val'>{cl_tot:,.0f}</div><div class='metric-lbl'>TOTAL CLICKS</div></div>", unsafe_allow_html=True)
-            c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>ADD TO LISTS</div></div>", unsafe_allow_html=True)
-            c4.markdown(f"<div class='metric-card'><div class='metric-val'>{t_tot:,.0f}</div><div class='metric-lbl'>TOTAL TTMS</div></div>", unsafe_allow_html=True)
-            c5.markdown(f"<div class='metric-card'><div class='metric-val'>{ctr_global_display}</div><div class='metric-lbl'>TOTAL ITEM CTR</div></div>", unsafe_allow_html=True)
-            
-            st.write("---")
-            st.subheader("🏆 Top 10 Items by Performance CTR")
-            st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
-            
-            st.write("---")
-            st.subheader("📊 Item Allocation vs Click Share")
-            tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
-            with tab_l1:
-                col_t1, col_c1 = st.columns(2)
-                with col_t1: st.dataframe(cat_l1_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
-                with col_c1: st.plotly_chart(px.bar(cat_l1_agg.melt(id_vars='L1_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L1 Category Share Allocation"), use_container_width=True)
-            with tab_l2:
-                col_t2, col_c2 = st.columns(2)
-                with col_t2: st.dataframe(cat_l2_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
-                with col_c2: st.plotly_chart(px.bar(cat_l2_agg.melt(id_vars='L2_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L2 Subcategory Share Allocation"), use_container_width=True)
-            with tab_l3:
-                col_t3, col_c3 = st.columns(2)
-                with col_t3: st.dataframe(cat_l3_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
-                with col_c3: st.plotly_chart(px.bar(cat_l3_agg.melt(id_vars='L3_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L3 Sub-subcategory Share Allocation"), use_container_width=True)
+    # --- 3. EXCEL INJECTION ---
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if not pivot_top.empty:
+            pivot_top.sort_values(by='Item CTR', ascending=False).head(50).to_excel(writer, sheet_name='Top Items', index=False)
+            cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
+            cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
+            cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
+            brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
+            if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
+            p_agg.to_excel(writer, sheet_name='Price Bands', index=False)
+            d_agg.to_excel(writer, sheet_name='Discount Bands', index=False)
+        if not df_sc_table.empty:
+            df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
+        if weekly_scroll is not None and not weekly_scroll.empty:
+            weekly_scroll.to_excel(writer, sheet_name='Weekly Scroll Variance', index=False)
+    output.seek(0)
+    
+    dl_placeholder.download_button(
+        label="⬇️ Download Dashboard Report (.xlsx)",
+        data=output,
+        file_name=f"Campaign_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-            st.write("---")
-            st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
-            b_col, c_col = st.columns(2)
-            with b_col:
-                st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
-                    'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
-                    'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
-                }), use_container_width=True, hide_index=True)
-            with c_col:
-                if not df_creative.empty:
-                    st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    # --- 4. RENDER UI ---
+    if merch_file and df_clean is not None:
+        st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
+        
+        top_cat = df_prod.groupby('L1_Category')['Clicks'].sum().idxmax() if not df_prod.empty else "General Merchandise"
+        top_brand = df_prod.groupby('Brand')['Clicks'].sum().idxmax() if not df_prod.empty else "UNKNOWN"
+        render_insight_box(
+            f"The campaign generated **{global_totals['views']:,.0f} views** and **{global_totals['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(global_totals['clicks']/global_totals['views']) if global_totals['views']>0 else 0:.2%}**.",
+            f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity.",
+            f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 CTR items to identify high-performing assets that can be repurposed in future creative."
+        )
+        
+        v_tot, cl_tot, cp_tot, t_tot = global_totals['views'], global_totals['clicks'], global_totals['clips'], global_totals['ttms']
+        ctr_global_display = f"{cl_tot/v_tot:.2%}" if v_tot > 0 else "0.00%"
+        
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.markdown(f"<div class='metric-card'><div class='metric-val'>{v_tot:,.0f}</div><div class='metric-lbl'>TOTAL VIEWS</div></div>", unsafe_allow_html=True)
+        c2.markdown(f"<div class='metric-card'><div class='metric-val'>{cl_tot:,.0f}</div><div class='metric-lbl'>TOTAL CLICKS</div></div>", unsafe_allow_html=True)
+        c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>ADD TO LISTS</div></div>", unsafe_allow_html=True)
+        c4.markdown(f"<div class='metric-card'><div class='metric-val'>{t_tot:,.0f}</div><div class='metric-lbl'>TOTAL TTMS</div></div>", unsafe_allow_html=True)
+        c5.markdown(f"<div class='metric-card'><div class='metric-val'>{ctr_global_display}</div><div class='metric-lbl'>TOTAL ITEM CTR</div></div>", unsafe_allow_html=True)
+        
+        st.write("---")
+        st.subheader("🏆 Top 10 Items by Performance CTR")
+        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        
+        st.write("---")
+        st.subheader("📊 Item Allocation vs Click Share")
+        tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
+        with tab_l1:
+            col_t1, col_c1 = st.columns(2)
+            with col_t1: st.dataframe(cat_l1_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+            with col_c1: st.plotly_chart(px.bar(cat_l1_agg.melt(id_vars='L1_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L1 Category Share Allocation"), use_container_width=True)
+        with tab_l2:
+            col_t2, col_c2 = st.columns(2)
+            with col_t2: st.dataframe(cat_l2_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+            with col_c2: st.plotly_chart(px.bar(cat_l2_agg.melt(id_vars='L2_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L2 Subcategory Share Allocation"), use_container_width=True)
+        with tab_l3:
+            col_t3, col_c3 = st.columns(2)
+            with col_t3: st.dataframe(cat_l3_agg.sort_values(by='Clicks', ascending=False).style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+            with col_c3: st.plotly_chart(px.bar(cat_l3_agg.melt(id_vars='L3_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'], title="L3 Sub-subcategory Share Allocation"), use_container_width=True)
 
-            st.write("---")
-            st.subheader("💰 Pricing & Promotional Band Analysis")
-            band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
-            c_p, c_d = st.columns(2)
-            with c_p: st.dataframe(p_agg[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
-            with c_d: st.dataframe(d_agg[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
+        st.write("---")
+        st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
+        b_col, c_col = st.columns(2)
+        with b_col:
+            st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
+                'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+            }), use_container_width=True, hide_index=True)
+        with c_col:
+            if not df_creative.empty:
+                st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-            if not df_sc_table.empty:
-                st.write("---")
-                st.subheader("📉 Audience Scroll Retention & Drop-off")
-                sc_col1, sc_col2 = st.columns([1, 2])
-                with sc_col1:
-                    st.dataframe(df_sc_table[['Scroll Depth', '% of Users Read', 'Approx Page']].style.format({'% of Users Read': '{:.1%}'}), use_container_width=True, hide_index=True)
-                with sc_col2:
-                    fig = px.line(df_sc_table, x='Scroll Depth', y='% of Users Read', markers=True, color_discrete_sequence=['#0054B7'])
-                    fig.update_layout(yaxis=dict(tickformat='.0%', range=[0,1]))
-                    st.plotly_chart(fig, use_container_width=True)
+        st.write("---")
+        st.subheader("💰 Pricing & Promotional Band Analysis")
+        band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
+        c_p, c_d = st.columns(2)
+        with c_p: st.dataframe(p_agg[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
+        with c_d: st.dataframe(d_agg[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
+
+    if scroll_file and not df_sc_table.empty:
+        st.write("---")
+        st.subheader("📉 Audience Scroll Retention & Drop-off")
+        
+        if top_week:
+            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks in your data. The top performing flight for average audience scroll retention was **{top_week}**.")
+            
+        sc_col1, sc_col2 = st.columns([1, 2])
+        with sc_col1:
+            st.markdown("**Global Average Retention**")
+            st.dataframe(df_sc_table[['Scroll Depth', '% of Users Read', 'Approx Page']].style.format({'% of Users Read': '{:.1%}'}), use_container_width=True, hide_index=True)
+        with sc_col2:
+            if weekly_scroll is not None and not weekly_scroll.empty:
+                fig = px.line(weekly_scroll, x='Milestone', y='Retention', color='Campaign/Week', markers=True, title="Variance by Campaign/Week")
+            else:
+                fig = px.line(df_sc_table, x='Scroll Depth', y='% of Users Read', markers=True, color_discrete_sequence=['#0054B7'])
+            fig.update_layout(yaxis=dict(tickformat='.0%', range=[0,1]))
+            st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
@@ -417,32 +462,36 @@ def render_head_to_head_variance():
     st.markdown("<div class='main-header'>Head-to-Head Comparison</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Compare Period A (Base Year) against Period B (Variant Year) to calculate strategic growth deltas.</div>", unsafe_allow_html=True)
     
-    # Placeholder for top-level export button
     dl_placeholder = st.empty()
     
     colA, colB = st.columns(2)
     with colA: 
-        file_A = st.file_uploader("📁 Period A: Base File (Control Year)", type=["xlsx", "csv"])
+        file_A = st.file_uploader("📁 Period A: Base Merch File", type=["xlsx", "csv"])
         scroll_A = st.file_uploader("📉 Period A: Scroll Depth File [Optional]", type=["xlsx", "csv"])
     with colB: 
-        file_B = st.file_uploader("📁 Period B: Variant File (Test Year)", type=["xlsx", "csv"])
+        file_B = st.file_uploader("📁 Period B: Variant Merch File", type=["xlsx", "csv"])
         scroll_B = st.file_uploader("📉 Period B: Scroll Depth File [Optional]", type=["xlsx", "csv"])
     
-    if not file_A or not file_B:
-        st.warning("⚠️ **Waiting for data:** Please upload BOTH the Base File and the Variant File to generate the comparison matrix.")
+    merch_ready = file_A is not None and file_B is not None
+    scroll_ready = scroll_A is not None and scroll_B is not None
+
+    if not merch_ready and not scroll_ready:
+        st.warning("⚠️ **Waiting for data:** Please upload BOTH Base and Variant files (either Merchandise or Scroll Depth) to generate a comparison.")
         return
         
-    dfA_clean, mA, _ = scrub_and_load_excel(file_A)
-    dfB_clean, mB, _ = scrub_and_load_excel(file_B)
+    dfA_clean, mA, _ = scrub_and_load_excel(file_A) if file_A else (None, None, None)
+    dfB_clean, mB, _ = scrub_and_load_excel(file_B) if file_B else (None, None, None)
     
-    if dfA_clean is not None and dfB_clean is not None:
+    br_merge = cat_m_l1 = cat_m_l2 = cat_m_l3 = final_sk = new_skus = ret_skus = p_merge = d_merge = tbl_merge = pd.DataFrame()
+
+    # --- PROCESS MERCH FILES ---
+    if merch_ready and dfA_clean is not None and dfB_clean is not None:
         dfA_prod, _, gloA = process_metrics(dfA_clean, mA)
         dfB_prod, _, gloB = process_metrics(dfB_clean, mB)
         
         _, rA, _, dA_from, dA_to = extract_exact_metadata(dfA_clean)
         _, rB, _, dB_from, dB_to = extract_exact_metadata(dfB_clean)
         
-        # --- DATA CRUNCHING ---
         def build_shift_matrix(col_name):
             catA = dfA_prod.groupby(col_name).agg(CntA=('SKU', 'count'), ClkA=('Clicks', 'sum')).reset_index()
             catA['Alloc Base %'] = catA['CntA'] / catA['CntA'].sum() if catA['CntA'].sum() > 0 else 0
@@ -464,7 +513,6 @@ def render_head_to_head_variance():
         skA = dfA_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
         skB = dfB_prod.groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Curr_Price': 'mean'}).reset_index()
         sk_m = pd.merge(skA, skB, on='SKU', suffixes=(' Base', ' Variant'), how='inner')
-        final_sk = pd.DataFrame()
         if not sk_m.empty:
             sk_m['CTR Base'] = np.where(sk_m['Views Base'] > 0, sk_m['Clicks Base'] / sk_m['Views Base'], 0)
             sk_m['CTR Variant'] = np.where(sk_m['Views Variant'] > 0, sk_m['Clicks Variant'] / sk_m['Views Variant'], 0)
@@ -491,17 +539,19 @@ def render_head_to_head_variance():
         d_merge = pd.merge(dA, dB, on='Discount_Tier').fillna(0)
         d_merge['Click Share Shift'] = (d_merge['Variant Clicks'] / d_merge['Variant Clicks'].sum()) - (d_merge['Base Clicks'] / d_merge['Base Clicks'].sum())
 
-        tbl_merge = pd.DataFrame()
-        if scroll_A and scroll_B:
-            try:
-                df_scA, df_scB = process_scroll_file(scroll_A, 'Base Year'), process_scroll_file(scroll_B, 'Variant Year')
-                tbl_merge = pd.merge(df_scA[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Base % Read', 'Approx Page': 'Base Page'}), df_scB[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Variant % Read', 'Approx Page': 'Variant Page'}), on='Milestone', how='outer').rename(columns={'Milestone': 'Scroll Depth'})
-                tbl_merge['Approx Page'] = tbl_merge['Variant Page'].combine_first(tbl_merge['Base Page'])
-            except: pass
+    # --- PROCESS SCROLL FILES ---
+    if scroll_ready:
+        try:
+            df_scA, _, _ = process_scroll_file(scroll_A, 'Base Year')
+            df_scB, _, _ = process_scroll_file(scroll_B, 'Variant Year')
+            tbl_merge = pd.merge(df_scA[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Base % Read', 'Approx Page': 'Base Page'}), df_scB[['Milestone', 'Approx Page', 'Retention']].rename(columns={'Retention': 'Variant % Read', 'Approx Page': 'Variant Page'}), on='Milestone', how='outer').rename(columns={'Milestone': 'Scroll Depth'})
+            tbl_merge['Approx Page'] = tbl_merge['Variant Page'].combine_first(tbl_merge['Base Page'])
+        except: pass
 
-        # --- GENERATE EXCEL AND INJECT INTO TOP PLACEHOLDER ---
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    # --- EXCEL INJECTION ---
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if merch_ready:
             br_merge.to_excel(writer, sheet_name='Brand Momentum', index=False)
             cat_m_l1.to_excel(writer, sheet_name='L1 Category Shifts', index=False)
             cat_m_l2.to_excel(writer, sheet_name='L2 Category Shifts', index=False)
@@ -511,17 +561,19 @@ def render_head_to_head_variance():
             if not ret_skus.empty: ret_skus.to_excel(writer, sheet_name='Retired SKUs', index=False)
             p_merge.to_excel(writer, sheet_name='Price Shifts', index=False)
             d_merge.to_excel(writer, sheet_name='Discount Shifts', index=False)
-            if not tbl_merge.empty: tbl_merge.to_excel(writer, sheet_name='Scroll Shifts', index=False)
-            
-        output.seek(0)
-        dl_placeholder.download_button(
-            label="⬇️ Download H2H Comparison Report (.xlsx)",
-            data=output,
-            file_name=f"H2H_Comparison_Report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        if not tbl_merge.empty: 
+            tbl_merge.to_excel(writer, sheet_name='Scroll Shifts', index=False)
+        
+    output.seek(0)
+    dl_placeholder.download_button(
+        label="⬇️ Download H2H Comparison Report (.xlsx)",
+        data=output,
+        file_name=f"H2H_Comparison_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-        # --- RENDER UI ---
+    # --- RENDER MERCH UI ---
+    if merch_ready:
         st.info(f"⚖️ **COMPARING:** {rA} ({dA_from} to {dA_to}) **VERSUS** {rB} ({dB_from} to {dB_to})")
         w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m_l1)
         render_insight_box(w, sw, nw)
@@ -575,16 +627,17 @@ def render_head_to_head_variance():
         with c_p: st.dataframe(p_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
         with c_d: st.dataframe(d_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
 
-        if not tbl_merge.empty:
-            st.write("---")
-            st.subheader("📉 Slot 7: YoY Audience Scroll Retention")
-            sc_col1, sc_col2 = st.columns([1, 2])
-            with sc_col1:
-                st.dataframe(tbl_merge[['Scroll Depth', 'Base % Read', 'Variant % Read', 'Approx Page']].style.format({'Base % Read': '{:.1%}', 'Variant % Read': '{:.1%}'}), use_container_width=True, hide_index=True)
-            with sc_col2:
-                df_scA = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Base % Read'], 'Period': 'Base Year'})
-                df_scB = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Variant % Read'], 'Period': 'Variant Year'})
-                st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
+    # --- RENDER SCROLL UI ---
+    if not tbl_merge.empty:
+        st.write("---")
+        st.subheader("📉 YoY Audience Scroll Retention")
+        sc_col1, sc_col2 = st.columns([1, 2])
+        with sc_col1:
+            st.dataframe(tbl_merge[['Scroll Depth', 'Base % Read', 'Variant % Read', 'Approx Page']].style.format({'Base % Read': '{:.1%}', 'Variant % Read': '{:.1%}'}), use_container_width=True, hide_index=True)
+        with sc_col2:
+            df_scA = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Base % Read'], 'Period': 'Base Year'})
+            df_scB = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Variant % Read'], 'Period': 'Variant Year'})
+            st.plotly_chart(px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'}).update_layout(yaxis=dict(tickformat='.0%', range=[0,1])), use_container_width=True)
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS
@@ -593,7 +646,6 @@ def render_benchmark_scorecard():
     st.markdown("<div class='main-header'>🏆 Industry Benchmarks (DNU - IN DEV)</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Compare a client's current flight directly against a historical industry baseline, aligned by season.</div>", unsafe_allow_html=True)
     
-    # Placeholder for top-level export button
     dl_placeholder = st.empty()
 
     colA, colB = st.columns(2)
@@ -675,7 +727,6 @@ def render_benchmark_scorecard():
     c_pages = get_avg_pages(client_prod)
     b_pages = get_avg_pages(bench_prod)
     
-    # --- GENERATE EXCEL AND INJECT INTO TOP PLACEHOLDER ---
     scorecard_df = pd.DataFrame({
         "Metric": ["Avg. Item CTR", "Marketing Banner CTR", "Avg. Flyer Length (Pages)"],
         "Client Performance": [f"{c_item_ctr:.2%}", f"{c_bnr_ctr:.2%}", f"{c_pages:,.1f}"],

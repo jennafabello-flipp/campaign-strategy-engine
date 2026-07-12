@@ -355,7 +355,7 @@ def render_single_campaign_matrix():
                 
             df_prod_bands = df_prod.copy()
             
-            # --- THE FIX: NEW GRANULAR PRICE BANDS ---
+            # --- EXTENDED PRICE BANDS ---
             price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
             price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
             
@@ -390,8 +390,9 @@ def render_single_campaign_matrix():
             cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
             brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
             if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
-            p_agg.to_excel(writer, sheet_name='Price Bands', index=False)
-            d_agg.to_excel(writer, sheet_name='Discount Bands', index=False)
+            # Ensure price/discount exports are sorted logically by tier too
+            p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
+            d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
         if not df_sc_table.empty:
             df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
         if weekly_scroll is not None and not weekly_scroll.empty:
@@ -462,9 +463,31 @@ def render_single_campaign_matrix():
         st.write("---")
         st.subheader("💰 Pricing & Promotional Band Analysis")
         band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
+        
+        # Sort categorically by tier instead of clicks
+        p_agg_sorted = p_agg.sort_values(by='Price_Tier')
+        d_agg_sorted = d_agg.sort_values(by='Discount_Tier')
+
         c_p, c_d = st.columns(2)
-        with c_p: st.dataframe(p_agg[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
-        with c_d: st.dataframe(d_agg[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).style.format(band_fmt), use_container_width=True, hide_index=True)
+        with c_p: 
+            st.markdown("**Price Band Performance**")
+            st.dataframe(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+        with c_d: 
+            st.markdown("**Discount Band Performance**")
+            st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+            
+        # Add visual bar chart for Price Bands
+        fig_price = px.bar(
+            p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['List Share %', 'TTM Share %']),
+            x='Price_Tier',
+            y='value',
+            color='variable',
+            barmode='group',
+            color_discrete_sequence=['#16a34a', '#0054B7'],
+            title="Price Band Impact: Add to List % vs. Transfer to Merchant %"
+        )
+        fig_price.update_layout(yaxis=dict(tickformat='.1%'), xaxis_title="Price Tier", yaxis_title="% of Total Share")
+        st.plotly_chart(fig_price, use_container_width=True)
 
     if scroll_file and not df_sc_table.empty:
         st.write("---")
@@ -578,7 +601,6 @@ def render_head_to_head_variance():
         if not ret_skus.empty: ret_skus['Item CTR'] = np.where(ret_skus['Views'] > 0, ret_skus['Clicks'] / ret_skus['Views'], 0)
 
         for d in [dfA_prod, dfB_prod]: 
-            # --- THE FIX: NEW GRANULAR PRICE BANDS FOR H2H ---
             price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
             price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
             
@@ -613,8 +635,9 @@ def render_head_to_head_variance():
             if not final_sk.empty: final_sk.to_excel(writer, sheet_name='Shared SKUs Delta', index=False)
             if not new_skus.empty: new_skus.to_excel(writer, sheet_name='New SKUs', index=False)
             if not ret_skus.empty: ret_skus.to_excel(writer, sheet_name='Retired SKUs', index=False)
-            p_merge.to_excel(writer, sheet_name='Price Shifts', index=False)
-            d_merge.to_excel(writer, sheet_name='Discount Shifts', index=False)
+            # Ensure price/discount exports are sorted logically by tier
+            p_merge.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Shifts', index=False)
+            d_merge.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Shifts', index=False)
         if not tbl_merge.empty: 
             tbl_merge.to_excel(writer, sheet_name='Scroll Shifts', index=False)
         
@@ -677,9 +700,18 @@ def render_head_to_head_variance():
 
         st.write("---")
         st.subheader("💰 Slot 6: YoY Pricing & Promotional Shift")
+        
+        # Sort categorically by tier
+        p_merge_sorted = p_merge.sort_values(by='Price_Tier')
+        d_merge_sorted = d_merge.sort_values(by='Discount_Tier')
+
         c_p, c_d = st.columns(2)
-        with c_p: st.dataframe(p_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
-        with c_d: st.dataframe(d_merge.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
+        with c_p: 
+            st.markdown("**YoY Price Band Shifts**")
+            st.dataframe(p_merge_sorted.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
+        with c_d: 
+            st.markdown("**YoY Discount Band Shifts**")
+            st.dataframe(d_merge_sorted.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
 
     # --- RENDER SCROLL UI ---
     if not tbl_merge.empty:

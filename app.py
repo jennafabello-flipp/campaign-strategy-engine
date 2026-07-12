@@ -191,6 +191,14 @@ def process_scroll_file(scroll_file, period_name=None):
     df_sc.columns = [str(c).strip() for c in df_sc.columns]
     cols_lower = [c.lower() for c in df_sc.columns]
     
+    # NEW FIX: Custom sorter to ensure alphabetical percentage ranges sort correctly
+    def get_sort_val(x):
+        s = str(x).lower()
+        if 'open' in s: return -1
+        if 'finish' in s or 'complete' in s: return 9999
+        nums = re.findall(r'\d+', s)
+        return float(nums[0]) if nums else 999
+
     # Priority identifiers for breakout
     id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
     if not id_col:
@@ -199,49 +207,67 @@ def process_scroll_file(scroll_file, period_name=None):
         id_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['date', 'run', 'campaign', 'week', 'title'])), None)
     
     weekly_data = None
-    top_week_name = None
+    qbr_insights = None
 
     if 'scroll depth' in cols_lower and 'cumulative readers' in cols_lower and 'total readers' in cols_lower:
         get_exact = lambda name: next((c for c in df_sc.columns if c.lower() == name), None)
         sd_col, pr_col, cr_col, tr_col = get_exact('scroll depth'), get_exact('pages read'), get_exact('cumulative readers'), get_exact('total readers')
         
         if pr_col: df_sc[pr_col] = pd.to_numeric(df_sc[pr_col], errors='coerce').fillna(0)
+        df_sc['sort_val'] = df_sc[sd_col].apply(get_sort_val)
         
         # 1. Overall Aggregation
-        agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum'}).reset_index()
+        agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
         agg['Retention'] = np.where(agg[tr_col] > 0, agg[cr_col] / agg[tr_col], 0)
+        agg = agg.sort_values('sort_val')
         
-        if pr_col:
-            agg = agg.sort_values(pr_col)
-            agg['Approx Page'] = agg[pr_col].round(1)
-        else:
-            agg = agg.sort_values('Retention', ascending=False)
-            agg['Approx Page'] = "N/A"
+        if pr_col: agg['Approx Page'] = agg[pr_col].round(1)
+        else: agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
         
-        # 2. QBR Weekly Analysis - THE FIX
+        # 2. QBR Weekly Analysis
         if id_col and df_sc[id_col].nunique() > 1:
-            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum'}).reset_index()
+            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
             week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
-            weekly_data = week_agg.rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
+            weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
             
-            # Using 'sum' instead of 'mean' calculates Area Under the Curve (Avg Pages Read Per User)
-            # This mathematically penalizes 1-page flyers and rewards deep retention on longer flyers.
-            week_score = week_agg.groupby(id_col)['Retention'].sum()
+            # Using 'sum' calculates Area Under the Curve (Avg Pages Read Per User)
+            week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
             top_week_name = week_score.idxmax()
+            top_week_score = week_score.max()
+
+            # Find the stark drop-off point for the winning week
+            top_data = weekly_data[weekly_data['Campaign/Week'] == top_week_name].copy()
+            top_data['Drop'] = top_data['Retention'].diff() # Calculates current step minus previous step
+            steepest_idx = top_data['Drop'].idxmin() # idxmin finds the largest negative drop
+            
+            if pd.notna(steepest_idx):
+                drop_milestone = top_data.loc[steepest_idx, 'Milestone']
+                drop_amt = abs(top_data.loc[steepest_idx, 'Drop'])
+            else:
+                drop_milestone = "N/A"
+                drop_amt = 0
+                
+            qbr_insights = {
+                'top_week': top_week_name,
+                'score': top_week_score,
+                'drop_milestone': drop_milestone,
+                'drop_amt': drop_amt
+            }
 
     else:
         df_sc = df_sc.iloc[:, :3]
         df_sc.columns = ['Milestone', 'Readers', 'Retention']
         df_sc['Retention'] = pd.to_numeric(df_sc['Retention'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
         df_sc['Retention'] = np.where(df_sc['Retention'] > 1, df_sc['Retention'] / 100, df_sc['Retention'])
-        agg = df_sc.dropna(subset=['Retention']).copy()
+        df_sc['sort_val'] = df_sc['Milestone'].apply(get_sort_val)
+        agg = df_sc.dropna(subset=['Retention']).sort_values('sort_val').copy()
         agg['Approx Page'] = "N/A"
         
     if period_name: agg['Period'] = period_name
     
     final_df = agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
-    return final_df, weekly_data, top_week_name
+    return final_df, weekly_data, qbr_insights
 
 def generate_h2h_insight(gloA, gloB, cat_m_l1):
     v_del = (gloB['views'] - gloA['views']) / gloA['views'] if gloA['views'] > 0 else 0
@@ -296,11 +322,10 @@ def render_single_campaign_matrix():
         st.info("⚠️ **Waiting for data:** Please upload a Merchandise file, a Scroll Depth file, or both to begin analysis.")
         return
 
-    # Initialize empty tables for safe Excel Export
     pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = pd.DataFrame()
     df_sc_table = pd.DataFrame()
     weekly_scroll = pd.DataFrame()
-    top_week = None
+    qbr_insights = None
 
     # --- 1. PROCESS MERCHANDISE DATA (IF UPLOADED) ---
     if merch_file:
@@ -346,7 +371,7 @@ def render_single_campaign_matrix():
     # --- 2. PROCESS SCROLL DATA (IF UPLOADED) ---
     if scroll_file:
         try:
-            df_sc_raw, weekly_scroll, top_week = process_scroll_file(scroll_file)
+            df_sc_raw, weekly_scroll, qbr_insights = process_scroll_file(scroll_file)
             df_sc_table = df_sc_raw.copy().rename(columns={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
         except Exception as e:
             st.warning(f"Could not process the scroll file. Error: {str(e)}")
@@ -441,8 +466,13 @@ def render_single_campaign_matrix():
         st.write("---")
         st.subheader("📉 Audience Scroll Retention & Drop-off")
         
-        if top_week:
-            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks in your data. Factoring in both retention rate and total pages, the top performing flight for overall audience scroll volume was **{top_week}**.")
+        if qbr_insights:
+            st.success(f"🌟 **QBR Insight:** The engine detected multiple campaigns/weeks. The top performing flight was **{qbr_insights['top_week']}**.")
+            st.markdown(f"""
+            * **Why did it win?** It achieved an 'Area Under the Curve' score of **{qbr_insights['score']:.2f}**.
+            * **Key Friction Point:** For this winning week, the most stark audience drop-off (losing **{qbr_insights['drop_amt']:.1%}** of remaining readers) didn't happen until the **{qbr_insights['drop_milestone']}** mark, keeping users highly engaged early on.
+            """)
+            st.markdown("<small>ℹ️ <b>How is this scored?</b> We use 'Area Under the Curve' (the sum of retention percentages across all milestones). This mathematically rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero actual depth.</small>", unsafe_allow_html=True)
             
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:

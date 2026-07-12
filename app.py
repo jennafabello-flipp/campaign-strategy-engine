@@ -481,6 +481,7 @@ def render_single_campaign_matrix():
         fig_price.update_layout(yaxis=dict(tickformat='.1%'), xaxis_title="Price Tier", yaxis_title="% of Total Share")
         st.plotly_chart(fig_price, use_container_width=True)
         
+        # --- SKU INCLUDED FOR SINGLE CAMPAIGN ---
         if not p_agg_sorted.empty and global_totals['views'] > 0:
             top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None
             top_ttm_tier = p_agg_sorted.loc[p_agg_sorted['TTMs'].idxmax(), 'Price_Tier'] if p_agg_sorted['TTMs'].sum() > 0 else None
@@ -493,13 +494,13 @@ def render_single_campaign_matrix():
                     if top_list_tier:
                         st.success(f"📋 **Top Add-to-List Tier: {top_list_tier}**")
                         top_list_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_list_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
-                        st.dataframe(top_list_items[['Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        st.dataframe(top_list_items[['SKU', 'Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
                         
                 with col_tt:
                     if top_ttm_tier:
                         st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier}**")
                         top_ttm_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_ttm_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
-                        st.dataframe(top_ttm_items[['Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
     if scroll_file and not df_sc_table.empty:
         st.write("---")
@@ -723,7 +724,7 @@ def render_head_to_head_variance():
             st.markdown("**YoY Discount Band Shifts**")
             st.dataframe(d_merge_sorted.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
 
-        # --- THE NEW FIX FOR H2H: WINNING VARIANT PRICE BAND HERO PRODUCTS ---
+        # --- SKU INCLUDED FOR HEAD-TO-HEAD ---
         if not dfB_prod.empty and gloB['views'] > 0:
             pB_full = dfB_prod.groupby('Price_Tier', observed=False).agg(Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             top_list_tier_B = pB_full.loc[pB_full['Clips'].idxmax(), 'Price_Tier'] if pB_full['Clips'].sum() > 0 else None
@@ -738,13 +739,13 @@ def render_head_to_head_variance():
                     if top_list_tier_B:
                         st.success(f"📋 **Top Add-to-List Tier: {top_list_tier_B}**")
                         top_list_items = dfB_prod[dfB_prod['Price_Tier'] == top_list_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
-                        st.dataframe(top_list_items[['Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        st.dataframe(top_list_items[['SKU', 'Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
                         
                 with col_tt:
                     if top_ttm_tier_B:
                         st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier_B}**")
                         top_ttm_items = dfB_prod[dfB_prod['Price_Tier'] == top_ttm_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
-                        st.dataframe(top_ttm_items[['Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
 
     # --- RENDER SCROLL UI ---

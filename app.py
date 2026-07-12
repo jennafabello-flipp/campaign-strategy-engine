@@ -228,13 +228,10 @@ def process_scroll_file(scroll_file, period_name=None):
             weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
             
             # --- THE 3-POINT QBR CALCULATION ---
-            # 1. Volume (Area Under the Curve)
             week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
             vol_week = week_score.idxmax()
             vol_score = week_score.max()
 
-            # 2. Efficiency (Lowest Drop-off Velocity)
-            # Filter out short flyers by requiring > 2 milestones
             counts = weekly_data.groupby('Campaign/Week')['Milestone'].count()
             valid_weeks = counts[counts > 2].index
             if len(valid_weeks) == 0: valid_weeks = counts.index
@@ -243,7 +240,6 @@ def process_scroll_file(scroll_file, period_name=None):
             eff_week = eff_scores.idxmax() 
             eff_drop = abs(eff_scores.max()) if pd.notna(eff_scores.max()) else 0
 
-            # 3. Half-Life (50% Drop-off Point for the Volume Winner)
             hl_data = weekly_data[(weekly_data['Campaign/Week'] == vol_week) & (weekly_data['Retention'] < 0.50)]
             hl_milestone = hl_data.iloc[0]['Milestone'] if not hl_data.empty else "Finished Flyer"
                 
@@ -355,7 +351,6 @@ def render_single_campaign_matrix():
                 
             df_prod_bands = df_prod.copy()
             
-            # --- EXTENDED PRICE BANDS ---
             price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
             price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
             
@@ -390,7 +385,6 @@ def render_single_campaign_matrix():
             cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
             brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
             if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
-            # Ensure price/discount exports are sorted logically by tier too
             p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
             d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
         if not df_sc_table.empty:
@@ -464,7 +458,6 @@ def render_single_campaign_matrix():
         st.subheader("💰 Pricing & Promotional Band Analysis")
         band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
         
-        # Sort categorically by tier instead of clicks
         p_agg_sorted = p_agg.sort_values(by='Price_Tier')
         d_agg_sorted = d_agg.sort_values(by='Discount_Tier')
 
@@ -476,7 +469,6 @@ def render_single_campaign_matrix():
             st.markdown("**Discount Band Performance**")
             st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        # Add visual bar chart for Price Bands
         fig_price = px.bar(
             p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['List Share %', 'TTM Share %']),
             x='Price_Tier',
@@ -488,6 +480,26 @@ def render_single_campaign_matrix():
         )
         fig_price.update_layout(yaxis=dict(tickformat='.1%'), xaxis_title="Price Tier", yaxis_title="% of Total Share")
         st.plotly_chart(fig_price, use_container_width=True)
+        
+        if not p_agg_sorted.empty and global_totals['views'] > 0:
+            top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None
+            top_ttm_tier = p_agg_sorted.loc[p_agg_sorted['TTMs'].idxmax(), 'Price_Tier'] if p_agg_sorted['TTMs'].sum() > 0 else None
+            
+            if top_list_tier or top_ttm_tier:
+                st.markdown("#### 🛍️ Hero Products in Winning Price Bands")
+                col_tl, col_tt = st.columns(2)
+                
+                with col_tl:
+                    if top_list_tier:
+                        st.success(f"📋 **Top Add-to-List Tier: {top_list_tier}**")
+                        top_list_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_list_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
+                        st.dataframe(top_list_items[['Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        
+                with col_tt:
+                    if top_ttm_tier:
+                        st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier}**")
+                        top_ttm_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_ttm_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
+                        st.dataframe(top_ttm_items[['Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
     if scroll_file and not df_sc_table.empty:
         st.write("---")
@@ -635,7 +647,6 @@ def render_head_to_head_variance():
             if not final_sk.empty: final_sk.to_excel(writer, sheet_name='Shared SKUs Delta', index=False)
             if not new_skus.empty: new_skus.to_excel(writer, sheet_name='New SKUs', index=False)
             if not ret_skus.empty: ret_skus.to_excel(writer, sheet_name='Retired SKUs', index=False)
-            # Ensure price/discount exports are sorted logically by tier
             p_merge.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Shifts', index=False)
             d_merge.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Shifts', index=False)
         if not tbl_merge.empty: 
@@ -701,7 +712,6 @@ def render_head_to_head_variance():
         st.write("---")
         st.subheader("💰 Slot 6: YoY Pricing & Promotional Shift")
         
-        # Sort categorically by tier
         p_merge_sorted = p_merge.sort_values(by='Price_Tier')
         d_merge_sorted = d_merge.sort_values(by='Discount_Tier')
 
@@ -712,6 +722,30 @@ def render_head_to_head_variance():
         with c_d: 
             st.markdown("**YoY Discount Band Shifts**")
             st.dataframe(d_merge_sorted.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
+
+        # --- THE NEW FIX FOR H2H: WINNING VARIANT PRICE BAND HERO PRODUCTS ---
+        if not dfB_prod.empty and gloB['views'] > 0:
+            pB_full = dfB_prod.groupby('Price_Tier', observed=False).agg(Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            top_list_tier_B = pB_full.loc[pB_full['Clips'].idxmax(), 'Price_Tier'] if pB_full['Clips'].sum() > 0 else None
+            top_ttm_tier_B = pB_full.loc[pB_full['TTMs'].idxmax(), 'Price_Tier'] if pB_full['TTMs'].sum() > 0 else None
+            
+            if top_list_tier_B or top_ttm_tier_B:
+                st.markdown("#### 🛍️ Variant Year: Hero Products in Top Price Bands")
+                st.markdown(f"<small>These specific items are driving the highest engagement in your current ({rB}) campaign.</small>", unsafe_allow_html=True)
+                col_tl, col_tt = st.columns(2)
+                
+                with col_tl:
+                    if top_list_tier_B:
+                        st.success(f"📋 **Top Add-to-List Tier: {top_list_tier_B}**")
+                        top_list_items = dfB_prod[dfB_prod['Price_Tier'] == top_list_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
+                        st.dataframe(top_list_items[['Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        
+                with col_tt:
+                    if top_ttm_tier_B:
+                        st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier_B}**")
+                        top_ttm_items = dfB_prod[dfB_prod['Price_Tier'] == top_ttm_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
+                        st.dataframe(top_ttm_items[['Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
+
 
     # --- RENDER SCROLL UI ---
     if not tbl_merge.empty:

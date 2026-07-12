@@ -239,9 +239,8 @@ def process_scroll_file(scroll_file, period_name=None):
             valid_weeks = counts[counts > 2].index
             if len(valid_weeks) == 0: valid_weeks = counts.index
             
-            # diff() calculates drop between steps (creates negative numbers). mean() gets the average drop.
             eff_scores = weekly_data[weekly_data['Campaign/Week'].isin(valid_weeks)].groupby('Campaign/Week')['Retention'].apply(lambda x: x.diff().mean())
-            eff_week = eff_scores.idxmax() # The max negative number is closest to zero (smallest drop)
+            eff_week = eff_scores.idxmax() 
             eff_drop = abs(eff_scores.max()) if pd.notna(eff_scores.max()) else 0
 
             # 3. Half-Life (50% Drop-off Point for the Volume Winner)
@@ -355,7 +354,12 @@ def render_single_campaign_matrix():
                 cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
                 
             df_prod_bands = df_prod.copy()
-            df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=[-1, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
+            
+            # --- THE FIX: NEW GRANULAR PRICE BANDS ---
+            price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
+            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
+            
+            df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=price_bins, labels=price_labels)
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
@@ -467,7 +471,7 @@ def render_single_campaign_matrix():
         st.subheader("📉 Audience Scroll Retention & Drop-off")
         
         if qbr_insights:
-            st.success(f"🌟 **Strategic Insight:** Multi-campaign scroll analysis complete. Here is how your audience engaged across the flights:")
+            st.success(f"🌟 **Insight:** The engine detected multiple campaigns/weeks. Here is how your audience engaged across the flights:")
             
             st.markdown(f"""
             **1. Total Content Consumed (Highest Volume)**
@@ -574,7 +578,11 @@ def render_head_to_head_variance():
         if not ret_skus.empty: ret_skus['Item CTR'] = np.where(ret_skus['Views'] > 0, ret_skus['Clicks'] / ret_skus['Views'], 0)
 
         for d in [dfA_prod, dfB_prod]: 
-            d['Price_Tier'] = pd.cut(d['Curr_Price'], bins=[0, 25, 50, 100, 250, 500, float('inf')], labels=["Under $25", "$25 - $50", "$50 - $100", "$100 - $250", "$250 - $500", "$500+"])
+            # --- THE FIX: NEW GRANULAR PRICE BANDS FOR H2H ---
+            price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
+            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
+            
+            d['Price_Tier'] = pd.cut(d['Curr_Price'], bins=price_bins, labels=price_labels)
             d['Discount_Tier'] = pd.cut(d['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
         
         pA, pB = dfA_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})

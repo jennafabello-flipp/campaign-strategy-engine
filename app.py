@@ -227,26 +227,33 @@ def process_scroll_file(scroll_file, period_name=None):
             week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
             weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
             
+            # --- THE 3-POINT QBR CALCULATION ---
+            # 1. Volume (Area Under the Curve)
             week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
-            top_week_name = week_score.idxmax()
-            top_week_score = week_score.max()
+            vol_week = week_score.idxmax()
+            vol_score = week_score.max()
 
-            top_data = weekly_data[weekly_data['Campaign/Week'] == top_week_name].copy()
-            top_data['Drop'] = top_data['Retention'].diff()
-            steepest_idx = top_data['Drop'].idxmin()
+            # 2. Efficiency (Lowest Drop-off Velocity)
+            # Filter out short flyers by requiring > 2 milestones
+            counts = weekly_data.groupby('Campaign/Week')['Milestone'].count()
+            valid_weeks = counts[counts > 2].index
+            if len(valid_weeks) == 0: valid_weeks = counts.index
             
-            if pd.notna(steepest_idx):
-                drop_milestone = top_data.loc[steepest_idx, 'Milestone']
-                drop_amt = abs(top_data.loc[steepest_idx, 'Drop'])
-            else:
-                drop_milestone = "N/A"
-                drop_amt = 0
+            # diff() calculates drop between steps (creates negative numbers). mean() gets the average drop.
+            eff_scores = weekly_data[weekly_data['Campaign/Week'].isin(valid_weeks)].groupby('Campaign/Week')['Retention'].apply(lambda x: x.diff().mean())
+            eff_week = eff_scores.idxmax() # The max negative number is closest to zero (smallest drop)
+            eff_drop = abs(eff_scores.max()) if pd.notna(eff_scores.max()) else 0
+
+            # 3. Half-Life (50% Drop-off Point for the Volume Winner)
+            hl_data = weekly_data[(weekly_data['Campaign/Week'] == vol_week) & (weekly_data['Retention'] < 0.50)]
+            hl_milestone = hl_data.iloc[0]['Milestone'] if not hl_data.empty else "Finished Flyer"
                 
             qbr_insights = {
-                'top_week': top_week_name,
-                'score': top_week_score,
-                'drop_milestone': drop_milestone,
-                'drop_amt': drop_amt
+                'vol_week': vol_week,
+                'vol_score': vol_score,
+                'eff_week': eff_week,
+                'eff_drop': eff_drop,
+                'hl_milestone': hl_milestone
             }
 
     else:
@@ -460,12 +467,22 @@ def render_single_campaign_matrix():
         st.subheader("📉 Audience Scroll Retention & Drop-off")
         
         if qbr_insights:
-            st.success(f"🌟 **Insight:** The engine detected multiple campaigns/weeks. The top performing flight was **{qbr_insights['top_week']}**.")
+            st.success(f"🌟 **Strategic Insight:** Multi-campaign scroll analysis complete. Here is how your audience engaged across the flights:")
+            
             st.markdown(f"""
-            * **Why did it win?** It successfully retained the highest volume of users across the deepest portion of the flyer.
-            * **Key Friction Point:** For this winning week, the most stark audience drop-off (losing **{qbr_insights['drop_amt']:.1%}** of remaining readers) didn't happen until the **{qbr_insights['drop_milestone']}** mark, keeping users highly engaged early on.
+            **1. Total Content Consumed (Highest Volume)**
+            * **Winner:** **{qbr_insights['vol_week']}**
+            * **Why it won:** This flyer drove the highest absolute volume of page reads. Even if users dropped off over time, its structure generated the most total brand engagement.
+
+            **2. Engagement Efficiency (Lowest Drop-off Velocity)**
+            * **Winner:** **{qbr_insights['eff_week']}**
+            * **Why it won:** This flyer was the most "gripping". It held onto its starting audience the best step-by-step, losing an average of only **{qbr_insights['eff_drop']:.1%}** of readers per scroll.
+
+            **3. The 'Half-Life' Metric (Median Reader Depth)**
+            * **Insight:** For your highest volume flyer ({qbr_insights['vol_week']}), you successfully kept the majority of your audience up until the **{qbr_insights['hl_milestone']}** mark.
+            * **Why it matters:** Any products or categories placed after this 50% drop-off threshold were essentially invisible to the majority of your weekly traffic.
             """)
-            st.markdown(f"<small>ℹ️ <b>How is this scored? (Score: {qbr_insights['score']:.2f})</b> We use 'Area Under the Curve' (the sum of retention percentages across all milestones). This mathematically rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero actual depth.</small>", unsafe_allow_html=True)
+            st.markdown(f"<small>ℹ️ <b>How is Volume Scored? (Score: {qbr_insights['vol_score']:.2f})</b> We use 'Area Under the Curve' (the mathematical sum of retention percentages across all milestones). This rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero depth.</small>", unsafe_allow_html=True)
             
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:
@@ -477,7 +494,6 @@ def render_single_campaign_matrix():
             else:
                 fig = px.line(df_sc_table, x='Scroll Depth', y='% of Users Read', markers=True, color_discrete_sequence=['#0054B7'])
             
-            # The Fix: Force Plotly to respect the exact order of the milestones from the pre-sorted table
             ordered_milestones = df_sc_table['Scroll Depth'].tolist()
             fig.update_layout(
                 xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
@@ -669,7 +685,6 @@ def render_head_to_head_variance():
             df_scB = pd.DataFrame({'Milestone': tbl_merge['Scroll Depth'], 'Retention': tbl_merge['Variant % Read'], 'Period': 'Variant Year'})
             fig = px.line(pd.concat([df_scA, df_scB]), x='Milestone', y='Retention', color='Period', markers=True, color_discrete_sequence=['#475569', '#0054B7'], labels={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
             
-            # The Fix: Force Plotly to respect the exact order of the milestones from the pre-sorted table
             ordered_milestones = tbl_merge['Scroll Depth'].tolist()
             fig.update_layout(
                 xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
@@ -810,4 +825,3 @@ elif "Head-to-Head" in pipeline_mode:
     render_head_to_head_variance()
 elif "Industry Benchmarks" in pipeline_mode: 
     render_benchmark_scorecard()
-     

@@ -361,11 +361,17 @@ def render_single_campaign_matrix():
             p_agg['Click Share %'] = p_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             p_agg['List Share %'] = p_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             p_agg['TTM Share %'] = p_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
+            
+            # --- THE FIX: STRIP EMPTY BANDS ---
+            p_agg = p_agg[p_agg['Items'] > 0]
 
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             d_agg['Click Share %'] = d_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             d_agg['List Share %'] = d_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             d_agg['TTM Share %'] = d_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
+            
+            # --- THE FIX: STRIP EMPTY BANDS ---
+            d_agg = d_agg[d_agg['Items'] > 0]
 
     # --- 2. PROCESS SCROLL DATA (IF UPLOADED) ---
     if scroll_file:
@@ -481,7 +487,6 @@ def render_single_campaign_matrix():
         fig_price.update_layout(yaxis=dict(tickformat='.1%'), xaxis_title="Price Tier", yaxis_title="% of Total Share")
         st.plotly_chart(fig_price, use_container_width=True)
         
-        # --- SKU INCLUDED FOR SINGLE CAMPAIGN ---
         if not p_agg_sorted.empty and global_totals['views'] > 0:
             top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None
             top_ttm_tier = p_agg_sorted.loc[p_agg_sorted['TTMs'].idxmax(), 'Price_Tier'] if p_agg_sorted['TTMs'].sum() > 0 else None
@@ -624,9 +629,15 @@ def render_head_to_head_variance():
         p_merge = pd.merge(pA, pB, on='Price_Tier').fillna(0)
         p_merge['Click Share Shift'] = (p_merge['Variant Clicks'] / p_merge['Variant Clicks'].sum()) - (p_merge['Base Clicks'] / p_merge['Base Clicks'].sum())
         
+        # --- THE FIX: STRIP EMPTY BANDS ---
+        p_merge = p_merge[(p_merge['Base Clicks'] > 0) | (p_merge['Variant Clicks'] > 0)]
+        
         dA, dB = dfA_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})
         d_merge = pd.merge(dA, dB, on='Discount_Tier').fillna(0)
         d_merge['Click Share Shift'] = (d_merge['Variant Clicks'] / d_merge['Variant Clicks'].sum()) - (d_merge['Base Clicks'] / d_merge['Base Clicks'].sum())
+        
+        # --- THE FIX: STRIP EMPTY BANDS ---
+        d_merge = d_merge[(d_merge['Base Clicks'] > 0) | (d_merge['Variant Clicks'] > 0)]
 
     # --- PROCESS SCROLL FILES ---
     if scroll_ready:
@@ -724,7 +735,6 @@ def render_head_to_head_variance():
             st.markdown("**YoY Discount Band Shifts**")
             st.dataframe(d_merge_sorted.style.format({'Base Clicks': '{:,.0f}', 'Variant Clicks': '{:,.0f}', 'Click Share Shift': '{:+.2%}'}), use_container_width=True, hide_index=True)
 
-        # --- SKU INCLUDED FOR HEAD-TO-HEAD ---
         if not dfB_prod.empty and gloB['views'] > 0:
             pB_full = dfB_prod.groupby('Price_Tier', observed=False).agg(Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             top_list_tier_B = pB_full.loc[pB_full['Clips'].idxmax(), 'Price_Tier'] if pB_full['Clips'].sum() > 0 else None
@@ -746,7 +756,6 @@ def render_head_to_head_variance():
                         st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier_B}**")
                         top_ttm_items = dfB_prod[dfB_prod['Price_Tier'] == top_ttm_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
                         st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
-
 
     # --- RENDER SCROLL UI ---
     if not tbl_merge.empty:

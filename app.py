@@ -76,6 +76,7 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
             'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
             'date': get_col(['Daily Available From', 'Date', 'Start Date']),
             'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
+            'run_name': get_col(['Flyer Run Name', 'Flyer Description', 'Campaign Name']),
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
@@ -96,6 +97,7 @@ def process_metrics(df, m):
     df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
     df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') else pd.NaT
     df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN"
+    df['Flyer_Description'] = df[m['run_name']].astype(str) if m.get('run_name') else df['Run_ID']
     
     def safe_numeric(col_name):
         if m[col_name] and m[col_name] in df.columns:
@@ -323,7 +325,6 @@ def render_single_campaign_matrix():
     weekly_scroll = pd.DataFrame()
     qbr_insights = None
 
-    # --- 1. PROCESS MERCHANDISE DATA (IF UPLOADED) ---
     if merch_file:
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
         if df_clean is not None:
@@ -361,19 +362,14 @@ def render_single_campaign_matrix():
             p_agg['Click Share %'] = p_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             p_agg['List Share %'] = p_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             p_agg['TTM Share %'] = p_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
-            
-            # --- THE FIX: STRIP EMPTY BANDS ---
             p_agg = p_agg[p_agg['Items'] > 0]
 
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             d_agg['Click Share %'] = d_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
             d_agg['List Share %'] = d_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             d_agg['TTM Share %'] = d_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
-            
-            # --- THE FIX: STRIP EMPTY BANDS ---
             d_agg = d_agg[d_agg['Items'] > 0]
 
-    # --- 2. PROCESS SCROLL DATA (IF UPLOADED) ---
     if scroll_file:
         try:
             df_sc_raw, weekly_scroll, qbr_insights = process_scroll_file(scroll_file)
@@ -381,7 +377,6 @@ def render_single_campaign_matrix():
         except Exception as e:
             st.warning(f"Could not process the scroll file. Error: {str(e)}")
 
-    # --- 3. EXCEL INJECTION ---
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         if not pivot_top.empty:
@@ -406,7 +401,6 @@ def render_single_campaign_matrix():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # --- 4. RENDER UI ---
     if merch_file and df_clean is not None:
         st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
         
@@ -527,7 +521,6 @@ def render_single_campaign_matrix():
             * **Insight:** For your highest volume flyer ({qbr_insights['vol_week']}), you successfully kept the majority of your audience up until the **{qbr_insights['hl_milestone']}** mark.
             * **Why it matters:** Any products or categories placed after this 50% drop-off threshold were essentially invisible to the majority of your weekly traffic.
             """)
-            st.markdown(f"<small>ℹ️ <b>How is Volume Scored? (Score: {qbr_insights['vol_score']:.2f})</b> We use 'Area Under the Curve' (the mathematical sum of retention percentages across all milestones). This rewards campaigns that drive a high volume of <i>actual reading depth</i> and naturally penalizes 1-page flyers that technically have 100% average retention but zero depth.</small>", unsafe_allow_html=True)
             
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:
@@ -575,7 +568,6 @@ def render_head_to_head_variance():
     
     br_merge = cat_m_l1 = cat_m_l2 = cat_m_l3 = final_sk = new_skus = ret_skus = p_merge = d_merge = tbl_merge = pd.DataFrame()
 
-    # --- PROCESS MERCH FILES ---
     if merch_ready and dfA_clean is not None and dfB_clean is not None:
         dfA_prod, _, gloA = process_metrics(dfA_clean, mA)
         dfB_prod, _, gloB = process_metrics(dfB_clean, mB)
@@ -628,18 +620,13 @@ def render_head_to_head_variance():
         pA, pB = dfA_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Price_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})
         p_merge = pd.merge(pA, pB, on='Price_Tier').fillna(0)
         p_merge['Click Share Shift'] = (p_merge['Variant Clicks'] / p_merge['Variant Clicks'].sum()) - (p_merge['Base Clicks'] / p_merge['Base Clicks'].sum())
-        
-        # --- THE FIX: STRIP EMPTY BANDS ---
         p_merge = p_merge[(p_merge['Base Clicks'] > 0) | (p_merge['Variant Clicks'] > 0)]
         
         dA, dB = dfA_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Base Clicks'}), dfB_prod.groupby('Discount_Tier', observed=False)['Clicks'].sum().reset_index().rename(columns={'Clicks': 'Variant Clicks'})
         d_merge = pd.merge(dA, dB, on='Discount_Tier').fillna(0)
         d_merge['Click Share Shift'] = (d_merge['Variant Clicks'] / d_merge['Variant Clicks'].sum()) - (d_merge['Base Clicks'] / d_merge['Base Clicks'].sum())
-        
-        # --- THE FIX: STRIP EMPTY BANDS ---
         d_merge = d_merge[(d_merge['Base Clicks'] > 0) | (d_merge['Variant Clicks'] > 0)]
 
-    # --- PROCESS SCROLL FILES ---
     if scroll_ready:
         try:
             df_scA, _, _ = process_scroll_file(scroll_A, 'Base Year')
@@ -648,7 +635,6 @@ def render_head_to_head_variance():
             tbl_merge['Approx Page'] = tbl_merge['Variant Page'].combine_first(tbl_merge['Base Page'])
         except: pass
 
-    # --- EXCEL INJECTION ---
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         if merch_ready:
@@ -672,7 +658,6 @@ def render_head_to_head_variance():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # --- RENDER MERCH UI ---
     if merch_ready:
         st.info(f"⚖️ **COMPARING:** {rA} ({dA_from} to {dA_to}) **VERSUS** {rB} ({dB_from} to {dB_to})")
         w, sw, nw = generate_h2h_insight(gloA, gloB, cat_m_l1)
@@ -757,7 +742,6 @@ def render_head_to_head_variance():
                         top_ttm_items = dfB_prod[dfB_prod['Price_Tier'] == top_ttm_tier_B].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
                         st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
-    # --- RENDER SCROLL UI ---
     if not tbl_merge.empty:
         st.write("---")
         st.subheader("📉 YoY Audience Scroll Retention")
@@ -775,6 +759,138 @@ def render_head_to_head_variance():
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
             st.plotly_chart(fig, use_container_width=True)
+
+
+# ==============================================================================
+# 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
+# ==============================================================================
+def render_taylors_workspace():
+    st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload your Merch Metrics, FSA Zone file, and USPS Reference to instantly join and calculate regional performance. No VLOOKUPs required.</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
+    with col2: fsa_file = st.file_uploader("2️⃣ Upload FSA Zone Report", type=["xlsx", "csv"])
+    with col3: usps_file = st.file_uploader("3️⃣ Upload USPS Reference", type=["xlsx", "csv"])
+    
+    if not (merch_file and fsa_file and usps_file):
+        st.info("⚠️ **Awaiting Data:** Please upload all 3 files above to run the automated regional join pipeline.")
+        return
+
+    with st.spinner("Executing the VLOOKUP pipeline natively..."):
+        # 1. Load Merch Data
+        df_clean, m, _ = scrub_and_load_excel(merch_file)
+        if df_clean is None: return
+        df_prod, _, _ = process_metrics(df_clean, m)
+        
+        # 2. Load Generic Files (FSA and USPS)
+        def load_generic(f):
+            file_bytes = f.read()
+            if f.name.lower().endswith('.csv'): return pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
+            return pd.read_excel(io.BytesIO(file_bytes))
+
+        df_fsa = load_generic(fsa_file)
+        df_usps = load_generic(usps_file)
+        
+        # 3. Find specific columns dynamically for FSA and USPS
+        def get_col_fuzzy(df, keywords):
+            for col in df.columns:
+                if any(k in str(col).lower() for k in keywords): return col
+            return df.columns[0] # fallback
+
+        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer'])
+        fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'])
+        usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
+        usps_state_col = get_col_fuzzy(df_usps, ['state', 'province'])
+
+        # 4. Join USPS to FSA to get State
+        df_fsa = df_fsa.merge(df_usps[[usps_zip_col, usps_state_col]], left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
+        
+        # Group by Flyer Description to find the most common state for that Flyer
+        state_mapping = df_fsa.groupby(fsa_desc_col)[usps_state_col].agg(lambda x: x.mode()[0] if not x.mode().empty else 'Unknown').reset_index()
+        
+        # 5. Map State to Internal Regions
+        region_map = {
+            'DE': 'East', 'MD': 'East', 'NJ': 'East', 'OH': 'East', 'PA': 'East', 'VA': 'East',
+            'CA': 'West',
+            'ID': 'Northwest', 'OR': 'Northwest', 'WA': 'Northwest',
+            'NV': 'Nevada'
+        }
+        state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
+        
+        # 6. Join back to Merch Data
+        df_prod = df_prod.merge(state_mapping, left_on='Flyer_Description', right_on=fsa_desc_col, how='left')
+        df_prod['Region'] = df_prod['Region'].fillna('Other')
+        
+        # 7. Taylor's Custom cat_m Logic (Replaces the slow Excel AI Formula)
+        def get_taylor_cat(name, l1, l2):
+            text = f"{name} {l1} {l2}".lower()
+            
+            if any(w in text for w in ['wine', 'beer', 'spirit', 'liquor', 'vodka', 'whiskey', 'tequila', 'ipa', 'alcohol']): return 'Alcohol'
+            if 'bacon' in text: return 'Bacon'
+            if any(w in text for w in ['ice cream', 'gelato', 'sorbet', 'popsicle']): return 'Ice Cream'
+            if any(w in text for w in ['butter', 'margarine']): return 'Butter'
+            if any(w in text for w in ['cheese', 'cheddar', 'mozzarella', 'provolone', 'gouda', 'brie', 'feta', 'parmesan']): return 'Cheese'
+            if any(w in text for w in ['milk', 'yogurt', 'sour cream', 'cream cheese', 'cottage cheese', 'dairy']): return 'Dairy'
+            if 'egg' in text and 'leg' not in text: return 'Eggs'
+            if any(w in text for w in ['dog', 'cat', 'pet', 'kibble', 'treat']): return 'Pet'
+            if any(w in text for w in ['frozen', 'pizza (frozen)']): return 'Frozen'
+            if any(w in text for w in ['bakery', 'bread', 'muffin', 'bagel', 'croissant', 'fresh baked', 'bun', 'roll', 'tart', 'pastry']): return 'Bakery'
+            if any(w in text for w in ['fish', 'salmon', 'shrimp', 'crab', 'seafood', 'tuna', 'lobster', 'cod', 'tilapia']): return 'Seafood'
+            if any(w in text for w in ['deli', 'cold cut', 'salami', 'prosciutto', 'sliced ham', 'sliced turkey']): return 'Deli'
+            if any(w in text for w in ['beef', 'chicken', 'pork', 'steak', 'ground beef', 'poultry', 'meat', 'roast', 'breast', 'thigh']): return 'Fresh Meat'
+            if any(w in text for w in ['produce', 'fresh fruit', 'fresh veg', 'apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'berry', 'grapes']): return 'Produce'
+            if any(w in text for w in ['water', 'soda', 'pop', 'juice', 'coke', 'pepsi', 'coffee', 'tea', 'beverage', 'drink']): return 'Beverages'
+            if any(w in text for w in ['detergent', 'cleaner', 'paper towel', 'toilet', 'soap', 'trash bag', 'home']): return 'Home'
+            
+            return 'Grocery' # The Catch-All
+            
+        df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Name'], row['L1_Category'], row['L2_Category']), axis=1)
+        
+        # Filter for validity to clean up charts
+        df_prod['Item CTR'] = np.where(df_prod['Views'] > 0, df_prod['Clicks'] / df_prod['Views'], 0)
+        
+    st.success("✅ **Data Merged Successfully!** No VLOOKUPs required.")
+    
+    st.write("---")
+    # VISUAL 1: Top Category by Item CTR (Bar Chart)
+    st.subheader("📊 Top Category by Item CTR")
+    cat_agg = df_prod.groupby('cat_m').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    cat_agg['Category CTR'] = np.where(cat_agg['Views'] > 0, cat_agg['Clicks'] / cat_agg['Views'], 0)
+    cat_agg = cat_agg.sort_values(by='Category CTR', ascending=False).head(15)
+    
+    fig_cat = px.bar(cat_agg, x='cat_m', y='Category CTR', title='Category Item CTR Performance', color_discrete_sequence=['#0054B7'])
+    fig_cat.update_layout(yaxis=dict(tickformat='.2%'), xaxis_title="Product Category (cat_m)", yaxis_title="Category CTR")
+    st.plotly_chart(fig_cat, use_container_width=True)
+
+    # VISUAL 2: Top Items by Item CTR
+    st.write("---")
+    st.subheader("🏆 Top Items by Item CTR")
+    top_items = df_prod.groupby('SKU').agg({'Name': 'first', 'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
+    top_items = top_items[top_items['Views'] > 50] # Adding a volume floor to prevent 1-view anomalies
+    st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(15).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+    # VISUAL 3: Category CTR by Region
+    st.write("---")
+    st.subheader("🗺️ Category CTR by Region")
+    reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    reg_cat_agg['CTR'] = np.where(reg_cat_agg['Views'] > 0, reg_cat_agg['Clicks'] / reg_cat_agg['Views'], 0)
+    pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
+    st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+
+    # VISUAL 4: Top Items by Region
+    st.write("---")
+    st.subheader("📍 Top Items by Region (Item CTR & Clicks)")
+    tab_reg = st.tabs(list(df_prod['Region'].unique()))
+    
+    for i, r in enumerate(df_prod['Region'].unique()):
+        with tab_reg[i]:
+            reg_items = df_prod[df_prod['Region'] == r].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+            reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
+            reg_items = reg_items[reg_items['Views'] > 50].sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
+            st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS
@@ -899,7 +1015,8 @@ pipeline_mode = st.sidebar.radio(
     [
         "📁 Single Campaign Breakdown", 
         "📊 Head-to-Head Comparison", 
-        "🏆 Industry Benchmarks (DNU - IN DEV)"
+        "🏆 Industry Benchmarks (DNU - IN DEV)",
+        "🧰 Taylor's Workspace"
     ]
 )
 
@@ -909,3 +1026,5 @@ elif "Head-to-Head" in pipeline_mode:
     render_head_to_head_variance()
 elif "Industry Benchmarks" in pipeline_mode: 
     render_benchmark_scorecard()
+elif "Taylor's Workspace" in pipeline_mode:
+    render_taylors_workspace()

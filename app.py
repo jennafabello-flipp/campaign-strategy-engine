@@ -6,9 +6,11 @@ import io
 import re
 import os
 
-# Create the hidden benchmarks directory on the server if it doesn't exist
+# Create the hidden directories on the server if they don't exist
 if not os.path.exists("benchmarks"):
     os.makedirs("benchmarks")
+if not os.path.exists("reference_data"):
+    os.makedirs("reference_data")
 
 # ==============================================================================
 # 🚀 SETUP & CONFIGURATION
@@ -766,18 +768,24 @@ def render_head_to_head_variance():
 # ==============================================================================
 def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload your Merch Metrics, FSA Zone file, and USPS Reference to instantly join and calculate regional performance. No VLOOKUPs required.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
-    with col2: fsa_file = st.file_uploader("2️⃣ Upload FSA Zone Report", type=["xlsx", "csv"])
-    with col3: usps_file = st.file_uploader("3️⃣ Upload USPS Reference", type=["xlsx", "csv"])
+    with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
     
-    if not (merch_file and fsa_file and usps_file):
-        st.info("⚠️ **Awaiting Data:** Please upload all 3 files above to run the automated regional join pipeline.")
+    # Path to the hidden USPS reference file
+    usps_path = "reference_data/usps_reference.xlsx"
+    
+    if not os.path.exists(usps_path):
+        st.error("⚠️ **System Missing File:** Please ask your admin to place the `usps_reference.xlsx` file inside the `reference_data/` folder on the server.")
         return
 
-    with st.spinner("Executing the VLOOKUP pipeline natively..."):
+    if not (merch_file and fsa_files and len(fsa_files) > 0):
+        st.info("⚠️ **Awaiting Data:** Please upload your Merch file and at least one FSA file to run the pipeline.")
+        return
+
+    with st.spinner("Executing the automated pipeline natively..."):
         # 1. Load Merch Data
         df_clean, m, _ = scrub_and_load_excel(merch_file)
         if df_clean is None: return
@@ -789,8 +797,9 @@ def render_taylors_workspace():
             if f.name.lower().endswith('.csv'): return pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
             return pd.read_excel(io.BytesIO(file_bytes))
 
-        df_fsa = load_generic(fsa_file)
-        df_usps = load_generic(usps_file)
+        # Stitch multiple FSA files together effortlessly
+        df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
+        df_usps = pd.read_excel(usps_path)
         
         # 3. Find specific columns dynamically for FSA and USPS
         def get_col_fuzzy(df, keywords):
@@ -850,7 +859,7 @@ def render_taylors_workspace():
         # Filter for validity to clean up charts
         df_prod['Item CTR'] = np.where(df_prod['Views'] > 0, df_prod['Clicks'] / df_prod['Views'], 0)
         
-    st.success("✅ **Data Merged Successfully!** No VLOOKUPs required.")
+    st.success("✅ **Data Merged Successfully!** Multiple FSA files processed and no VLOOKUPs required.")
     
     st.write("---")
     # VISUAL 1: Top Category by Item CTR (Bar Chart)

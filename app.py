@@ -812,8 +812,16 @@ def render_taylors_workspace():
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
         usps_state_col = get_col_fuzzy(df_usps, ['state', 'province'])
 
-        # 4. Join USPS to FSA to get State
-        df_fsa = df_fsa.merge(df_usps[[usps_zip_col, usps_state_col]], left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
+        # --- THE FIX: PREVENT MEMORY CRASH & TYPE ERRORS ---
+        # Force all ZIP matching columns to be text and uppercase to prevent ValueErrors
+        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper()
+        df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper()
+
+        # 4. Remove duplicate ZIPs from USPS file to prevent an infinite RAM crash!
+        df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
+        
+        # Now join USPS to FSA safely
+        df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
         
         # Group by Flyer Description to find the most common state for that Flyer
         state_mapping = df_fsa.groupby(fsa_desc_col)[usps_state_col].agg(lambda x: x.mode()[0] if not x.mode().empty else 'Unknown').reset_index()
@@ -827,7 +835,7 @@ def render_taylors_workspace():
         }
         state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
         
-        # 6. Join back to Merch Data (Forcing strings to prevent ValueErrors!)
+        # 6. Join back to Merch Data (Forcing strings again to protect the final merge!)
         df_prod['Flyer_Description'] = df_prod['Flyer_Description'].astype(str).str.strip()
         state_mapping[fsa_desc_col] = state_mapping[fsa_desc_col].astype(str).str.strip()
         

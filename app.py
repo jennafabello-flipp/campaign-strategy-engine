@@ -823,8 +823,9 @@ def render_taylors_workspace():
         # Now join USPS to FSA safely
         df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
         
-        # Group by Flyer Description to find the most common state for that Flyer
-        state_mapping = df_fsa.groupby(fsa_desc_col)[usps_state_col].agg(lambda x: x.mode()[0] if not x.mode().empty else 'Unknown').reset_index()
+        # Group by Flyer Description to find the most common state for that Flyer (VECTORIZED FOR SPEED)
+        state_counts = df_fsa.groupby([fsa_desc_col, usps_state_col]).size().reset_index(name='count')
+        state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=[fsa_desc_col])
         
         # 5. Map State to Internal Regions
         region_map = {

@@ -827,7 +827,10 @@ def render_taylors_workspace():
         }
         state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
         
-        # 6. Join back to Merch Data
+        # 6. Join back to Merch Data (Forcing strings to prevent ValueErrors!)
+        df_prod['Flyer_Description'] = df_prod['Flyer_Description'].astype(str).str.strip()
+        state_mapping[fsa_desc_col] = state_mapping[fsa_desc_col].astype(str).str.strip()
+        
         df_prod = df_prod.merge(state_mapping, left_on='Flyer_Description', right_on=fsa_desc_col, how='left')
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         

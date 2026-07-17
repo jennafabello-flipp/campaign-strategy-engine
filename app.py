@@ -797,13 +797,15 @@ def render_taylors_workspace():
         df_clean, m, _ = scrub_and_load_excel(merch_file)
         if df_clean is None: return
         
-        # --- THE NON-SKU FILTER (Isolates items with completely blank original SKUs) ---
-        # Crucial fix: We must perform this filter BEFORE process_metrics overwrites the SKU column!
+        # --- THE FORTIFIED NON-SKU FILTER ---
         if m.get('sku') and m['sku'] in df_clean.columns:
             raw_sku_col = m['sku']
-            blank_mask = df_clean[raw_sku_col].isna() | \
-                         (df_clean[raw_sku_col].astype(str).str.strip() == '') | \
-                         (df_clean[raw_sku_col].astype(str).str.lower().isin(['nan', 'none', 'null', 'unknown', '0']))
+            
+            # Cleanly convert to string and strip whitespace to catch sneaky empty cells
+            sku_series = df_clean[raw_sku_col].astype(str).str.strip().str.lower()
+            
+            # Identify purely empty/generic items
+            blank_mask = sku_series.isin(['nan', 'none', 'null', 'unknown', '0', '0.0', ''])
             
             df_clean = df_clean[blank_mask].copy()
             
@@ -811,7 +813,7 @@ def render_taylors_workspace():
                 st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items. Please check your file.")
                 return
 
-        # NOW it is safe to process the remaining blank rows
+        # Process the newly filtered DataFrame
         df_prod, _, _ = process_metrics(df_clean, m)
 
         # 2. Load Generic Files (FSA and USPS)
@@ -864,35 +866,42 @@ def render_taylors_workspace():
         # Build Unique USPS Mapping Table
         df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
         
-        # --- THE ROW-BY-ROW REGIONAL DISTRIBUTION ENGINE ---
-        # Map out the exact states assigned to each campaign key via the zip codes
+        # --- PREVENTING DATA EXPLOSION (ROW-BY-ROW FIX) ---
         campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
         campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
         
-        # Exact requested mapping matrix logic
         def assign_custom_region(state_code):
             st_clean = str(state_code).strip().upper()
             if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA']: return 'East'
             if st_clean in ['CA']: return 'West'
             if st_clean in ['ID', 'OR', 'WA']: return 'Northwest'
             if st_clean in ['LV', 'NV']: return 'Nevada'
-            return st_clean # Keep original state name if it falls outside the requested rules
+            return st_clean 
             
         campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
         
-        # Explode/Join the product rows into their respective geographic regions
-        df_prod = df_prod.merge(campaign_states[['FSA_Join_Key', 'Region']], left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
+        # SUPER IMPORTANT: Drop duplicates based on Region so the join table doesn't explode the products
+        campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates()
         
-        # Fallback Fuzzy Substring Matching for custom campaign name variations
+        # Join product rows to regions
+        df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
+        
+        # --- THE SUPER-FAST VECTORIZED FUZZY MATCHER (Replaces `iterrows`) ---
         unmatched_mask = df_prod['Region'].isna()
         if unmatched_mask.any():
-            for idx, row in df_prod[unmatched_mask].iterrows():
-                m_key = str(row['Flyer_Join_Key'])
-                for _, fsa_row in campaign_states.iterrows():
-                    f_key = str(fsa_row['FSA_Join_Key'])
-                    if f_key and m_key and (f_key in m_key or m_key in f_key):
-                        df_prod.at[idx, 'Region'] = fsa_row['Region']
-                        break
+            # Turn the mapping into a fast list instead of looping over a DataFrame
+            fallback_dict = campaign_region_map.values.tolist()
+            
+            def fast_fuzzy(m_key):
+                m_str = str(m_key)
+                if not m_str or m_str == 'NAN': return 'Other'
+                for f_key, reg in fallback_dict:
+                    f_str = str(f_key)
+                    if f_str and (f_str in m_str or m_str in f_str):
+                        return reg
+                return 'Other'
+                
+            df_prod.loc[unmatched_mask, 'Region'] = df_prod.loc[unmatched_mask, 'Flyer_Join_Key'].apply(fast_fuzzy)
                         
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         

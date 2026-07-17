@@ -793,22 +793,26 @@ def render_taylors_workspace():
         return
 
     with st.spinner("Executing the automated pipeline natively..."):
-        # 1. Load Merch Data
+        # 1. Load the RAW Merch Data first
         df_clean, m, _ = scrub_and_load_excel(merch_file)
         if df_clean is None: return
-        df_prod, _, _ = process_metrics(df_clean, m)
         
         # --- THE NON-SKU FILTER (Isolates items with completely blank original SKUs) ---
+        # Crucial fix: We must perform this filter BEFORE process_metrics overwrites the SKU column!
         if m.get('sku') and m['sku'] in df_clean.columns:
             raw_sku_col = m['sku']
-            blank_mask = df_prod[raw_sku_col].isna() | \
-                         (df_prod[raw_sku_col].astype(str).str.strip() == '') | \
-                         (df_prod[raw_sku_col].astype(str).str.lower().isin(['nan', 'none', 'null', 'unknown']))
-            df_prod = df_prod[blank_mask].copy()
+            blank_mask = df_clean[raw_sku_col].isna() | \
+                         (df_clean[raw_sku_col].astype(str).str.strip() == '') | \
+                         (df_clean[raw_sku_col].astype(str).str.lower().isin(['nan', 'none', 'null', 'unknown', '0']))
             
-            if df_prod.empty:
+            df_clean = df_clean[blank_mask].copy()
+            
+            if df_clean.empty:
                 st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items. Please check your file.")
                 return
+
+        # NOW it is safe to process the remaining blank rows
+        df_prod, _, _ = process_metrics(df_clean, m)
 
         # 2. Load Generic Files (FSA and USPS)
         def load_generic(f):

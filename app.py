@@ -381,6 +381,7 @@ def render_single_campaign_matrix():
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        wrote_any = False
         if not pivot_top.empty:
             pivot_top.sort_values(by='Item CTR', ascending=False).head(50).to_excel(writer, sheet_name='Top Items', index=False)
             cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
@@ -390,10 +391,18 @@ def render_single_campaign_matrix():
             if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
             p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
             d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
+            wrote_any = True
         if not df_sc_table.empty:
             df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
+            wrote_any = True
         if weekly_scroll is not None and not weekly_scroll.empty:
             weekly_scroll.to_excel(writer, sheet_name='Weekly Scroll Variance', index=False)
+            wrote_any = True
+        
+        # 🚨 Prevent Excel IndexError crash if tables are empty
+        if not wrote_any:
+            pd.DataFrame({'Message': ['No data processed.']}).to_excel(writer, sheet_name='Empty Data', index=False)
+            
     output.seek(0)
     
     dl_placeholder.download_button(
@@ -639,6 +648,7 @@ def render_head_to_head_variance():
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        wrote_any = False
         if merch_ready:
             br_merge.to_excel(writer, sheet_name='Brand Momentum', index=False)
             cat_m_l1.to_excel(writer, sheet_name='L1 Category Shifts', index=False)
@@ -649,8 +659,13 @@ def render_head_to_head_variance():
             if not ret_skus.empty: ret_skus.to_excel(writer, sheet_name='Retired SKUs', index=False)
             p_merge.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Shifts', index=False)
             d_merge.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Shifts', index=False)
+            wrote_any = True
         if not tbl_merge.empty: 
             tbl_merge.to_excel(writer, sheet_name='Scroll Shifts', index=False)
+            wrote_any = True
+            
+        if not wrote_any:
+            pd.DataFrame({'Message': ['No data processed.']}).to_excel(writer, sheet_name='Empty Data', index=False)
         
     output.seek(0)
     dl_placeholder.download_button(

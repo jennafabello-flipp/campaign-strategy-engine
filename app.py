@@ -807,46 +807,49 @@ def render_taylors_workspace():
                 if any(k in str(col).lower() for k in keywords): return col
             return df.columns[0] # fallback
 
-        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer'])
+        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign'])
         fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'])
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
         usps_state_col = get_col_fuzzy(df_usps, ['state', 'province'])
 
-        # --- THE FIX: PREVENT MEMORY CRASH & TYPE ERRORS ---
-        # Force all ZIP matching columns to be text and uppercase to prevent ValueErrors
+        # --- AGGRESSIVE SCRUBBING TO PREVENT DIRTY JOINS ---
+        # Force all ZIP matching columns to be text and uppercase
         df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper()
         df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper()
 
-        # 4. Remove duplicate ZIPs from USPS file to prevent an infinite RAM crash!
+        # Force the Campaign Names to match exactly (Uppercase + No Spaces)
+        df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].astype(str).str.strip().str.upper()
+        df_fsa[fsa_desc_col] = df_fsa[fsa_desc_col].astype(str).str.strip().str.upper()
+
+        # 4. Remove duplicate ZIPs from USPS file
         df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
         
-        # Now join USPS to FSA safely
+        # Join USPS to FSA
         df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
         
-        # Group by Flyer Description to find the most common state for that Flyer (VECTORIZED FOR SPEED)
+        # Group by Flyer Description to find the most common state (Vectorized)
         state_counts = df_fsa.groupby([fsa_desc_col, usps_state_col]).size().reset_index(name='count')
         state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=[fsa_desc_col])
         
-        # 5. Map State to Internal Regions
+        # 5. Map State to Internal Regions (Expanded to catch more variations)
         region_map = {
-            'DE': 'East', 'MD': 'East', 'NJ': 'East', 'OH': 'East', 'PA': 'East', 'VA': 'East',
-            'CA': 'West',
+            'DE': 'East', 'MD': 'East', 'NJ': 'East', 'OH': 'East', 'PA': 'East', 'VA': 'East', 'NY': 'East', 'MA': 'East',
+            'CA': 'West', 'NV': 'Nevada',
             'ID': 'Northwest', 'OR': 'Northwest', 'WA': 'Northwest',
-            'NV': 'Nevada'
+            'ON': 'Canada', 'QC': 'Canada', 'BC': 'Canada', 'AB': 'Canada'
         }
+        
+        # Clean the state column before mapping
+        state_mapping[usps_state_col] = state_mapping[usps_state_col].astype(str).str.strip().str.upper()
         state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
         
-        # 6. Join back to Merch Data (Forcing strings again to protect the final merge!)
-        df_prod['Flyer_Description'] = df_prod['Flyer_Description'].astype(str).str.strip()
-        state_mapping[fsa_desc_col] = state_mapping[fsa_desc_col].astype(str).str.strip()
-        
-        df_prod = df_prod.merge(state_mapping, left_on='Flyer_Description', right_on=fsa_desc_col, how='left')
+        # 6. Join back to Merch Data safely using a strict 1-to-1 merge
+        df_prod = df_prod.merge(state_mapping[[fsa_desc_col, 'Region']], left_on='Flyer_Join_Key', right_on=fsa_desc_col, how='left')
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         
-        # 7. Taylor's Custom cat_m Logic (Replaces the slow Excel AI Formula)
+        # 7. Taylor's Custom cat_m Logic
         def get_taylor_cat(name, l1, l2):
             text = f"{name} {l1} {l2}".lower()
-            
             if any(w in text for w in ['wine', 'beer', 'spirit', 'liquor', 'vodka', 'whiskey', 'tequila', 'ipa', 'alcohol']): return 'Alcohol'
             if 'bacon' in text: return 'Bacon'
             if any(w in text for w in ['ice cream', 'gelato', 'sorbet', 'popsicle']): return 'Ice Cream'
@@ -863,7 +866,6 @@ def render_taylors_workspace():
             if any(w in text for w in ['produce', 'fresh fruit', 'fresh veg', 'apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'berry', 'grapes']): return 'Produce'
             if any(w in text for w in ['water', 'soda', 'pop', 'juice', 'coke', 'pepsi', 'coffee', 'tea', 'beverage', 'drink']): return 'Beverages'
             if any(w in text for w in ['detergent', 'cleaner', 'paper towel', 'toilet', 'soap', 'trash bag', 'home']): return 'Home'
-            
             return 'Grocery' # The Catch-All
             
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Name'], row['L1_Category'], row['L2_Category']), axis=1)

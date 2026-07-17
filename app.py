@@ -806,11 +806,13 @@ def render_taylors_workspace():
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
             
-            # Instantly drop any duplicate columns (e.g., two columns named "Zip")
+            # Instantly drop any duplicate columns to protect the merge
             return df.loc[:, ~df.columns.duplicated()]
 
         # Stitch multiple FSA files together effortlessly
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
+        # Drop duplicates one more time just to be incredibly safe after combining
+        df_fsa = df_fsa.loc[:, ~df_fsa.columns.duplicated()]
         
         # Safely load the USPS file whether it is a CSV or Excel file
         if usps_path.endswith('.csv'):
@@ -818,19 +820,37 @@ def render_taylors_workspace():
         else:
             df_usps = pd.read_excel(usps_path)
             
-        # Strip duplicate columns from USPS too, just in case!
         df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
         
-        # 3. Find specific columns dynamically for FSA and USPS
-        def get_col_fuzzy(df, keywords):
+        # 3. Intelligent Column Finder (PREVENTS DUPLICATE SELECTION ERRORS)
+        def get_col_fuzzy(df, keywords, exclude_cols=None):
+            exclude_cols = exclude_cols or []
+            
+            # Step 1: Look for exact match
             for col in df.columns:
-                if any(k in str(col).lower() for k in keywords): return col
-            return df.columns[0] # fallback
+                if col in exclude_cols: continue
+                if str(col).strip().lower() in keywords:
+                    return col
+                    
+            # Step 2: Look for substring
+            for col in df.columns:
+                if col in exclude_cols: continue
+                if any(k in str(col).lower() for k in keywords):
+                    return col
+                    
+            # Step 3: Absolute fallback (first unused column)
+            for col in df.columns:
+                if col not in exclude_cols:
+                    return col
+            return df.columns[0]
 
-        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign'])
-        fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'])
+        # Apply to FSA with exclusion logic
+        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign', 'name'])
+        fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=[fsa_desc_col])
+
+        # Apply to USPS with exclusion logic
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
-        usps_state_col = get_col_fuzzy(df_usps, ['state', 'province'])
+        usps_state_col = get_col_fuzzy(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
 
         # --- AGGRESSIVE SCRUBBING TO PREVENT DIRTY JOINS ---
         # Force all ZIP matching columns to be text and uppercase

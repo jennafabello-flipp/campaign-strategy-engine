@@ -798,6 +798,18 @@ def render_taylors_workspace():
         if df_clean is None: return
         df_prod, _, _ = process_metrics(df_clean, m)
         
+        # --- THE NON-SKU FILTER (Isolates items with completely blank original SKUs) ---
+        if m.get('sku') and m['sku'] in df_clean.columns:
+            raw_sku_col = m['sku']
+            blank_mask = df_prod[raw_sku_col].isna() | \
+                         (df_prod[raw_sku_col].astype(str).str.strip() == '') | \
+                         (df_prod[raw_sku_col].astype(str).str.lower().isin(['nan', 'none', 'null', 'unknown']))
+            df_prod = df_prod[blank_mask].copy()
+            
+            if df_prod.empty:
+                st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items. Please check your file.")
+                return
+
         # 2. Load Generic Files (FSA and USPS)
         def load_generic(f):
             file_bytes = f.read()
@@ -805,103 +817,93 @@ def render_taylors_workspace():
                 df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
-            # Instantly drop any duplicate columns to protect the merge
             return df.loc[:, ~df.columns.duplicated()]
 
-        # Stitch multiple FSA files together effortlessly
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
-        # Drop duplicates one more time just to be incredibly safe after combining
         df_fsa = df_fsa.loc[:, ~df_fsa.columns.duplicated()]
         
-        # Safely load the USPS file whether it is a CSV or Excel file
         if usps_path.endswith('.csv'):
             df_usps = pd.read_csv(usps_path, low_memory=False)
         else:
             df_usps = pd.read_excel(usps_path)
-            
         df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
         
-        # 3. Intelligent Column Finder (PREVENTS DUPLICATE SELECTION ERRORS)
+        # 3. Column Identification Helper
         def get_col_fuzzy(df, keywords, exclude_cols=None):
             exclude_cols = exclude_cols or []
-            # Step 1: Look for exact match
             for col in df.columns:
                 if col in exclude_cols: continue
-                if str(col).strip().lower() in keywords:
-                    return col
-            # Step 2: Look for substring
+                if str(col).strip().lower() in keywords: return col
             for col in df.columns:
                 if col in exclude_cols: continue
-                if any(k in str(col).lower() for k in keywords):
-                    return col
-            # Step 3: Absolute fallback (first unused column)
+                if any(k in str(col).lower() for k in keywords): return col
             for col in df.columns:
-                if col not in exclude_cols:
-                    return col
+                if col not in exclude_cols: return col
             return df.columns[0]
 
-        # Apply to FSA with exclusion logic
         fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign', 'name'])
         fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=[fsa_desc_col])
 
-        # Apply to USPS with exclusion logic
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
         usps_state_col = get_col_fuzzy(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
 
-        # --- THE REGIONAL JOIN FIX (AGGRESSIVE ALPHANUMERIC STRIPPER) ---
-        # Force all ZIP matching columns to be text, uppercase, and have zero spaces
+        # --- ARMORED KEY CLEANING ---
         df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
         df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
 
-        # Force the Campaign Names to match exactly by stripping spaces, hyphens, etc.
         def aggressive_key_clean(s):
             return re.sub(r'[^A-Z0-9]', '', str(s).upper())
             
         df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].apply(aggressive_key_clean)
         df_fsa['FSA_Join_Key'] = df_fsa[fsa_desc_col].apply(aggressive_key_clean)
 
-        # Remove duplicate ZIPs from USPS file
+        # Build Unique USPS Mapping Table
         df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
         
-        # Join USPS to FSA
-        df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
+        # --- THE ROW-BY-ROW REGIONAL DISTRIBUTION ENGINE ---
+        # Map out the exact states assigned to each campaign key via the zip codes
+        campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
+        campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
         
-        # Group by the hyper-clean Flyer Description to find the most common state
-        state_counts = df_fsa.groupby(['FSA_Join_Key', usps_state_col]).size().reset_index(name='count')
-        state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=['FSA_Join_Key'])
+        # Exact requested mapping matrix logic
+        def assign_custom_region(state_code):
+            st_clean = str(state_code).strip().upper()
+            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA']: return 'East'
+            if st_clean in ['CA']: return 'West'
+            if st_clean in ['ID', 'OR', 'WA']: return 'Northwest'
+            if st_clean in ['LV', 'NV']: return 'Nevada'
+            return st_clean # Keep original state name if it falls outside the requested rules
+            
+        campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
         
-        # 5. Map State to Internal Regions (Expanded to catch more variations)
-        region_map = {
-            'DE': 'East', 'MD': 'East', 'NJ': 'East', 'OH': 'East', 'PA': 'East', 'VA': 'East', 'NY': 'East', 'MA': 'East',
-            'CA': 'West', 'NV': 'Nevada',
-            'ID': 'Northwest', 'OR': 'Northwest', 'WA': 'Northwest',
-            'ON': 'Canada', 'QC': 'Canada', 'BC': 'Canada', 'AB': 'Canada'
-        }
+        # Explode/Join the product rows into their respective geographic regions
+        df_prod = df_prod.merge(campaign_states[['FSA_Join_Key', 'Region']], left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         
-        # Clean the state column before mapping
-        state_mapping[usps_state_col] = state_mapping[usps_state_col].astype(str).str.strip().str.upper()
-        state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
-        
-        # Join back to Merch Data safely using a strict 1-to-1 merge
-        df_prod = df_prod.merge(state_mapping[['FSA_Join_Key', 'Region']], left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
+        # Fallback Fuzzy Substring Matching for custom campaign name variations
+        unmatched_mask = df_prod['Region'].isna()
+        if unmatched_mask.any():
+            for idx, row in df_prod[unmatched_mask].iterrows():
+                m_key = str(row['Flyer_Join_Key'])
+                for _, fsa_row in campaign_states.iterrows():
+                    f_key = str(fsa_row['FSA_Join_Key'])
+                    if f_key and m_key and (f_key in m_key or m_key in f_key):
+                        df_prod.at[idx, 'Region'] = fsa_row['Region']
+                        break
+                        
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         
-        # --- THE PRODUCT NAME SCRUBBER (Solves the Absolute Metrics problem) ---
+        # --- THE PRODUCT NAME SCRUBBER ---
         def taylor_name_scrubber(text):
             text = str(text).lower()
-            # Remove promotional brackets like (New!) or [Sale]
             text = re.sub(r'\(.*?\)', '', text)
             text = re.sub(r'\[.*?\]', '', text)
-            # Remove weights and sizes (e.g. 500g, 2L, 12 pk, 1.5kg)
             text = re.sub(r'\b\d+(\.\d+)?\s*(g|kg|ml|l|oz|lb|pk|pack|ea|ct)\b', '', text)
-            # Replace special characters with spaces
             text = re.sub(r'[^a-z0-9\s]', ' ', text)
-            # Strip multiple spaces down to one
             return re.sub(r'\s+', ' ', text).strip().title()
             
         df_prod['Clean_Name'] = df_prod['Name'].apply(taylor_name_scrubber)
         
-        # 7. Taylor's Custom cat_m Logic
+        # Taylor's Custom cat_m Logic
         def get_taylor_cat(name, l1, l2):
             text = f"{name} {l1} {l2}".lower()
             if any(w in text for w in ['wine', 'beer', 'spirit', 'liquor', 'vodka', 'whiskey', 'tequila', 'ipa', 'alcohol']): return 'Alcohol'
@@ -920,11 +922,11 @@ def render_taylors_workspace():
             if any(w in text for w in ['produce', 'fresh fruit', 'fresh veg', 'apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'berry', 'grapes']): return 'Produce'
             if any(w in text for w in ['water', 'soda', 'pop', 'juice', 'coke', 'pepsi', 'coffee', 'tea', 'beverage', 'drink']): return 'Beverages'
             if any(w in text for w in ['detergent', 'cleaner', 'paper towel', 'toilet', 'soap', 'trash bag', 'home']): return 'Home'
-            return 'Grocery' # The Catch-All
+            return 'Grocery'
             
-        df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Name'], row['L1_Category'], row['L2_Category']), axis=1)
+        df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
         
-    st.success("✅ **Data Merged Successfully!** Product names unified and regions matched.")
+    st.success("✅ **Data Merged Successfully!** Blank SKUs isolated, Product names unified, and regions matched.")
     
     st.write("---")
     # VISUAL 1: Top Category by Item CTR (Bar Chart)
@@ -943,7 +945,7 @@ def render_taylors_workspace():
     top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
     top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
-    top_items = top_items[top_items['Views'] > 50] # Adding a volume floor to prevent 1-view anomalies
+    top_items = top_items[top_items['Views'] > 50]
     st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(15).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
     # VISUAL 3: Category CTR by Region

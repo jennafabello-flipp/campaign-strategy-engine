@@ -805,7 +805,6 @@ def render_taylors_workspace():
                 df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
-            
             # Instantly drop any duplicate columns to protect the merge
             return df.loc[:, ~df.columns.duplicated()]
 
@@ -825,19 +824,16 @@ def render_taylors_workspace():
         # 3. Intelligent Column Finder (PREVENTS DUPLICATE SELECTION ERRORS)
         def get_col_fuzzy(df, keywords, exclude_cols=None):
             exclude_cols = exclude_cols or []
-            
             # Step 1: Look for exact match
             for col in df.columns:
                 if col in exclude_cols: continue
                 if str(col).strip().lower() in keywords:
                     return col
-                    
             # Step 2: Look for substring
             for col in df.columns:
                 if col in exclude_cols: continue
                 if any(k in str(col).lower() for k in keywords):
                     return col
-                    
             # Step 3: Absolute fallback (first unused column)
             for col in df.columns:
                 if col not in exclude_cols:
@@ -852,24 +848,27 @@ def render_taylors_workspace():
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
         usps_state_col = get_col_fuzzy(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
 
-        # --- AGGRESSIVE SCRUBBING TO PREVENT DIRTY JOINS ---
-        # Force all ZIP matching columns to be text and uppercase
-        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper()
-        df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper()
+        # --- THE REGIONAL JOIN FIX (AGGRESSIVE ALPHANUMERIC STRIPPER) ---
+        # Force all ZIP matching columns to be text, uppercase, and have zero spaces
+        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+        df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
 
-        # Force the Campaign Names to match exactly (Uppercase + No Spaces)
-        df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].astype(str).str.strip().str.upper()
-        df_fsa[fsa_desc_col] = df_fsa[fsa_desc_col].astype(str).str.strip().str.upper()
+        # Force the Campaign Names to match exactly by stripping spaces, hyphens, etc.
+        def aggressive_key_clean(s):
+            return re.sub(r'[^A-Z0-9]', '', str(s).upper())
+            
+        df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].apply(aggressive_key_clean)
+        df_fsa['FSA_Join_Key'] = df_fsa[fsa_desc_col].apply(aggressive_key_clean)
 
-        # 4. Remove duplicate ZIPs from USPS file
+        # Remove duplicate ZIPs from USPS file
         df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
         
         # Join USPS to FSA
         df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
         
-        # Group by Flyer Description to find the most common state (Vectorized for Speed)
-        state_counts = df_fsa.groupby([fsa_desc_col, usps_state_col]).size().reset_index(name='count')
-        state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=[fsa_desc_col])
+        # Group by the hyper-clean Flyer Description to find the most common state
+        state_counts = df_fsa.groupby(['FSA_Join_Key', usps_state_col]).size().reset_index(name='count')
+        state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=['FSA_Join_Key'])
         
         # 5. Map State to Internal Regions (Expanded to catch more variations)
         region_map = {
@@ -883,9 +882,24 @@ def render_taylors_workspace():
         state_mapping[usps_state_col] = state_mapping[usps_state_col].astype(str).str.strip().str.upper()
         state_mapping['Region'] = state_mapping[usps_state_col].map(region_map).fillna('Other')
         
-        # 6. Join back to Merch Data safely using a strict 1-to-1 merge
-        df_prod = df_prod.merge(state_mapping[[fsa_desc_col, 'Region']], left_on='Flyer_Join_Key', right_on=fsa_desc_col, how='left')
+        # Join back to Merch Data safely using a strict 1-to-1 merge
+        df_prod = df_prod.merge(state_mapping[['FSA_Join_Key', 'Region']], left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         df_prod['Region'] = df_prod['Region'].fillna('Other')
+        
+        # --- THE PRODUCT NAME SCRUBBER (Solves the Absolute Metrics problem) ---
+        def taylor_name_scrubber(text):
+            text = str(text).lower()
+            # Remove promotional brackets like (New!) or [Sale]
+            text = re.sub(r'\(.*?\)', '', text)
+            text = re.sub(r'\[.*?\]', '', text)
+            # Remove weights and sizes (e.g. 500g, 2L, 12 pk, 1.5kg)
+            text = re.sub(r'\b\d+(\.\d+)?\s*(g|kg|ml|l|oz|lb|pk|pack|ea|ct)\b', '', text)
+            # Replace special characters with spaces
+            text = re.sub(r'[^a-z0-9\s]', ' ', text)
+            # Strip multiple spaces down to one
+            return re.sub(r'\s+', ' ', text).strip().title()
+            
+        df_prod['Clean_Name'] = df_prod['Name'].apply(taylor_name_scrubber)
         
         # 7. Taylor's Custom cat_m Logic
         def get_taylor_cat(name, l1, l2):
@@ -910,10 +924,7 @@ def render_taylors_workspace():
             
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Name'], row['L1_Category'], row['L2_Category']), axis=1)
         
-        # Filter for validity to clean up charts
-        df_prod['Item CTR'] = np.where(df_prod['Views'] > 0, df_prod['Clicks'] / df_prod['Views'], 0)
-        
-    st.success("✅ **Data Merged Successfully!** Multiple FSA files processed and no VLOOKUPs required.")
+    st.success("✅ **Data Merged Successfully!** Product names unified and regions matched.")
     
     st.write("---")
     # VISUAL 1: Top Category by Item CTR (Bar Chart)
@@ -926,10 +937,11 @@ def render_taylors_workspace():
     fig_cat.update_layout(yaxis=dict(tickformat='.2%'), xaxis_title="Product Category (cat_m)", yaxis_title="Category CTR")
     st.plotly_chart(fig_cat, use_container_width=True)
 
-    # VISUAL 2: Top Items by Item CTR
+    # VISUAL 2: Top Items by Item CTR (GROUPED BY CLEAN NAME, NOT SKU)
     st.write("---")
     st.subheader("🏆 Top Items by Item CTR")
-    top_items = df_prod.groupby('SKU').agg({'Name': 'first', 'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
     top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
     top_items = top_items[top_items['Views'] > 50] # Adding a volume floor to prevent 1-view anomalies
     st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(15).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
@@ -942,14 +954,15 @@ def render_taylors_workspace():
     pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
     st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
 
-    # VISUAL 4: Top Items by Region
+    # VISUAL 4: Top Items by Region (GROUPED BY CLEAN NAME)
     st.write("---")
     st.subheader("📍 Top Items by Region (Item CTR & Clicks)")
     tab_reg = st.tabs(list(df_prod['Region'].unique()))
     
     for i, r in enumerate(df_prod['Region'].unique()):
         with tab_reg[i]:
-            reg_items = df_prod[df_prod['Region'] == r].groupby('SKU').agg({'Name': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+            reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+            reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
             reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
             reg_items = reg_items[reg_items['Views'] > 50].sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
             st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)

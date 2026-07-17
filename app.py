@@ -774,11 +774,18 @@ def render_taylors_workspace():
     with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
     with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
     
-    # Path to the hidden USPS reference file
-    usps_path = "reference_data/usps_reference.csv"
+    # Path to the hidden USPS reference file (Supports CSV or XLSX)
+    usps_path_xlsx = "reference_data/usps_reference.xlsx"
+    usps_path_csv = "reference_data/usps_reference.csv"
     
-    if not os.path.exists(usps_path):
-        st.error("⚠️ **System Missing File:** Please ask your admin to place the `usps_reference.xlsx` file inside the `reference_data/` folder on the server.")
+    usps_path = None
+    if os.path.exists(usps_path_csv):
+        usps_path = usps_path_csv
+    elif os.path.exists(usps_path_xlsx):
+        usps_path = usps_path_xlsx
+        
+    if not usps_path:
+        st.error("⚠️ **System Missing File:** Please ask your admin to place the `usps_reference.xlsx` (or `.csv`) file inside the `reference_data/` folder on the server.")
         return
 
     if not (merch_file and fsa_files and len(fsa_files) > 0):
@@ -794,12 +801,25 @@ def render_taylors_workspace():
         # 2. Load Generic Files (FSA and USPS)
         def load_generic(f):
             file_bytes = f.read()
-            if f.name.lower().endswith('.csv'): return pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
-            return pd.read_excel(io.BytesIO(file_bytes))
+            if f.name.lower().endswith('.csv'): 
+                df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
+            else:
+                df = pd.read_excel(io.BytesIO(file_bytes))
+            
+            # Instantly drop any duplicate columns (e.g., two columns named "Zip")
+            return df.loc[:, ~df.columns.duplicated()]
 
         # Stitch multiple FSA files together effortlessly
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
-        df_usps = pd.read_csv(usps_path, low_memory=False)
+        
+        # Safely load the USPS file whether it is a CSV or Excel file
+        if usps_path.endswith('.csv'):
+            df_usps = pd.read_csv(usps_path, low_memory=False)
+        else:
+            df_usps = pd.read_excel(usps_path)
+            
+        # Strip duplicate columns from USPS too, just in case!
+        df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
         
         # 3. Find specific columns dynamically for FSA and USPS
         def get_col_fuzzy(df, keywords):
@@ -827,7 +847,7 @@ def render_taylors_workspace():
         # Join USPS to FSA
         df_fsa = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='left')
         
-        # Group by Flyer Description to find the most common state (Vectorized)
+        # Group by Flyer Description to find the most common state (Vectorized for Speed)
         state_counts = df_fsa.groupby([fsa_desc_col, usps_state_col]).size().reset_index(name='count')
         state_mapping = state_counts.sort_values('count', ascending=False).drop_duplicates(subset=[fsa_desc_col])
         

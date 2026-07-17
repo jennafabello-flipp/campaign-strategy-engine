@@ -805,7 +805,7 @@ def render_taylors_workspace():
             sku_series = df_clean[raw_sku_col].astype(str).str.strip().str.lower()
             
             # Identify purely empty/generic items
-            blank_mask = sku_series.isin(['nan', 'none', 'null', 'unknown', '0', '0.0', ''])
+            blank_mask = df_clean[raw_sku_col].isna() | sku_series.isin(['nan', 'none', 'null', 'unknown', '0', '0.0', ''])
             
             df_clean = df_clean[blank_mask].copy()
             
@@ -814,7 +814,14 @@ def render_taylors_workspace():
                 return
 
         # Process the newly filtered DataFrame
-        df_prod, _, _ = process_metrics(df_clean, m)
+        df_prod, df_creative, _ = process_metrics(df_clean, m)
+        
+        # 🚨 FIX: Re-combine products and creative assets! Blank SKUs are often banners/links!
+        df_prod = pd.concat([df_prod, df_creative], ignore_index=True)
+        
+        if df_prod.empty:
+            st.error("⚠️ The engine processed the file but the resulting table was empty. Check your source file.")
+            return
 
         # 2. Load Generic Files (FSA and USPS)
         def load_generic(f):
@@ -957,7 +964,6 @@ def render_taylors_workspace():
     top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
     top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
-    top_items = top_items[top_items['Views'] > 50]
     st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(15).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
     # VISUAL 3: Category CTR by Region
@@ -983,7 +989,8 @@ def render_taylors_workspace():
                 reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                 reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
                 reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
-                reg_items = reg_items[reg_items['Views'] > 50].sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
+                # Display top 10 items without the strict >50 views requirement
+                reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
                 st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
     else:
         st.info("No localized regional items captured.")

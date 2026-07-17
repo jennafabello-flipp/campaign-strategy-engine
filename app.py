@@ -775,7 +775,7 @@ def render_taylors_workspace():
     with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
     
     # Path to the hidden USPS reference file
-    usps_path = "reference_data/usps_reference.xlsx"
+    usps_path = "reference_data/usps_reference.csv"
     
     if not os.path.exists(usps_path):
         st.error("⚠️ **System Missing File:** Please ask your admin to place the `usps_reference.xlsx` file inside the `reference_data/` folder on the server.")
@@ -799,7 +799,7 @@ def render_taylors_workspace():
 
         # Stitch multiple FSA files together effortlessly
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
-        df_usps = pd.read_excel(usps_path)
+        df_usps = pd.read_csv(usps_path, low_memory=False)
         
         # 3. Find specific columns dynamically for FSA and USPS
         def get_col_fuzzy(df, keywords):

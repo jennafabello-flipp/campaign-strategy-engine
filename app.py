@@ -830,6 +830,8 @@ def render_taylors_workspace():
                 df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
+            # Rename columns to strings immediately to avoid duplicate collision 
+            df.columns = [str(c).strip() for c in df.columns]
             return df.loc[:, ~df.columns.duplicated()]
 
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
@@ -839,20 +841,31 @@ def render_taylors_workspace():
             df_usps = pd.read_csv(usps_path, low_memory=False)
         else:
             df_usps = pd.read_excel(usps_path)
+            
+        df_usps.columns = [str(c).strip() for c in df_usps.columns]
         df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
         
-        # 3. Column Identification Helper
+        # --- THE FIX: EMERGENCY COLUMN SHIELD ---
+        # Completely re-written to guarantee it never returns the same column twice.
         def get_col_fuzzy(df, keywords, exclude_cols=None):
             exclude_cols = exclude_cols or []
+            
+            # 1. Exact match
             for col in df.columns:
-                if col in exclude_cols: continue
-                if str(col).strip().lower() in keywords: return col
+                if col not in exclude_cols and str(col).strip().lower() in keywords: return col
+            
+            # 2. Partial match
             for col in df.columns:
-                if col in exclude_cols: continue
-                if any(k in str(col).lower() for k in keywords): return col
+                if col not in exclude_cols and any(k in str(col).lower() for k in keywords): return col
+            
+            # 3. Fallback to the first NON-EXCLUDED column
             for col in df.columns:
                 if col not in exclude_cols: return col
-            return df.columns[0]
+                
+            # 4. EMERGENCY SHIELD: If we run out of columns (e.g. 1-column file), create a dummy so it never duplicates
+            fallback_name = f"Missing_Data_Shield_{len(exclude_cols)}"
+            df[fallback_name] = "UNKNOWN"
+            return fallback_name
 
         fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign', 'name'])
         fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=[fsa_desc_col])

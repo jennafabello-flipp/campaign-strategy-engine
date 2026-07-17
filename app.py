@@ -286,8 +286,8 @@ def generate_h2h_insight(gloA, gloB, cat_m_l1):
     else:
         so_what = "Both reach and engagement contracted. The flight experienced macro-level headwinds, requiring a review of both traffic acquisition and merchandising strategy."
         
-    cat_m_l1['Efficiency'] = cat_m_l1['Alloc Variant %'] - cat_m_l1['Alloc Base %']
     if not cat_m_l1.empty:
+        cat_m_l1['Efficiency'] = cat_m_l1['Alloc Variant %'] - cat_m_l1['Alloc Base %']
         top_cat = cat_m_l1.loc[cat_m_l1['Allocation Shift'].idxmax()]['L1_Category']
         now_what = f"**1. Reallocate Space:** The '{top_cat}' category saw the highest positive shift in user click share. Consider increasing its footprint in the next flyer.<br>**2. Audit Product Churn:** Review the 'YoY Assortment Turnover' table below to verify if the newly introduced SKUs actually outperformed the items retired from the Base year."
     else:
@@ -886,17 +886,16 @@ def render_taylors_workspace():
         # Join product rows to regions
         df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         
-        # --- THE SUPER-FAST VECTORIZED FUZZY MATCHER (Replaces `iterrows`) ---
+        # --- THE FIX: ARMORED HIGH-SPEED GEOGRAPHIC ROUTER ---
         unmatched_mask = df_prod['Region'].isna()
         if unmatched_mask.any():
-            # Turn the mapping into a fast list instead of looping over a DataFrame
-            fallback_dict = campaign_region_map.values.tolist()
+            fallback_list = campaign_region_map.dropna(subset=['FSA_Join_Key', 'Region']).values.tolist()
             
             def fast_fuzzy(m_key):
-                m_str = str(m_key)
-                if not m_str or m_str == 'NAN': return 'Other'
-                for f_key, reg in fallback_dict:
-                    f_str = str(f_key)
+                m_str = str(m_key).strip()
+                if not m_str or m_str.upper() in ['NAN', 'NONE']: return 'Other'
+                for f_key, reg in fallback_list:
+                    f_str = str(f_key).strip()
                     if f_str and (f_str in m_str or m_str in f_str):
                         return reg
                 return 'Other'
@@ -966,21 +965,28 @@ def render_taylors_workspace():
     st.subheader("🗺️ Category CTR by Region")
     reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     reg_cat_agg['CTR'] = np.where(reg_cat_agg['Views'] > 0, reg_cat_agg['Clicks'] / reg_cat_agg['Views'], 0)
-    pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
-    st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+    
+    if not reg_cat_agg.empty:
+        pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
+        st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+    else:
+        st.info("No regional category trends found.")
 
     # VISUAL 4: Top Items by Region (GROUPED BY CLEAN NAME)
     st.write("---")
     st.subheader("📍 Top Items by Region (Item CTR & Clicks)")
-    tab_reg = st.tabs(list(df_prod['Region'].unique()))
-    
-    for i, r in enumerate(df_prod['Region'].unique()):
-        with tab_reg[i]:
-            reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-            reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
-            reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
-            reg_items = reg_items[reg_items['Views'] > 50].sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
-            st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    unique_regions = [r for r in df_prod['Region'].unique() if pd.notna(r)]
+    if unique_regions:
+        tab_reg = st.tabs(list(unique_regions))
+        for i, r in enumerate(unique_regions):
+            with tab_reg[i]:
+                reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
+                reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
+                reg_items = reg_items[reg_items['Views'] > 50].sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(10)
+                st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    else:
+        st.info("No localized regional items captured.")
 
 
 # ==============================================================================

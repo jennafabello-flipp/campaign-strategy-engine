@@ -875,9 +875,17 @@ def render_taylors_workspace():
         usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
         usps_state_col = get_col_fuzzy(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
 
-        # --- ARMORED KEY CLEANING ---
-        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
-        df_usps[usps_zip_col] = df_usps[usps_zip_col].astype(str).str.strip().str.upper().str.replace(r'\s+', '', regex=True)
+        # --- ARMORED KEY CLEANING & ZIP CODE PADDING ---
+        def safe_pad_zip(z):
+            z = str(z).strip().upper().replace(' ', '').replace('.0', '')
+            if z == 'NAN' or z == 'NONE': return 'UNKNOWN'
+            # If it is numeric and shorter than 5 digits, pad it with leading zeros
+            if z.isdigit() and len(z) < 5:
+                return z.zfill(5)
+            return z
+
+        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].apply(safe_pad_zip)
+        df_usps[usps_zip_col] = df_usps[usps_zip_col].apply(safe_pad_zip)
 
         def aggressive_key_clean(s):
             return re.sub(r'[^A-Z0-9]', '', str(s).upper())

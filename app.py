@@ -414,10 +414,12 @@ def render_single_campaign_matrix():
     if merch_file and df_clean is not None:
         st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
         
-       cat_clicks = df_prod.groupby('L1_Category')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
-top_cat = cat_clicks.idxmax() if not cat_clicks.empty else "General Merchandise"
-       brand_clicks = df_prod.groupby('Brand')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
-top_brand = brand_clicks.idxmax() if not brand_clicks.empty else "UNKNOWN"
+        cat_clicks = df_prod.groupby('L1_Category')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
+        top_cat = cat_clicks.idxmax() if not cat_clicks.empty else "General Merchandise"
+
+        brand_clicks = df_prod.groupby('Brand')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
+        top_brand = brand_clicks.idxmax() if not brand_clicks.empty else "UNKNOWN"
+        
         render_insight_box(
             f"The campaign generated **{global_totals['views']:,.0f} views** and **{global_totals['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(global_totals['clicks']/global_totals['views']) if global_totals['views']>0 else 0:.2%}**.",
             f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity.",
@@ -813,7 +815,6 @@ def render_taylors_workspace():
         df_clean, m, _ = scrub_and_load_excel(merch_file)
         if df_clean is None: return
         
-        # --- THE FORTIFIED NON-SKU FILTER ---
         if m.get('sku') and m['sku'] in df_clean.columns:
             raw_sku_col = m['sku']
             sku_series = df_clean[raw_sku_col].astype(str).str.strip().str.lower()
@@ -821,14 +822,10 @@ def render_taylors_workspace():
             df_clean = df_clean[blank_mask].copy()
             
             if df_clean.empty:
-                st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items. Please check your file.")
+                st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items.")
                 return
 
-        # Process the newly filtered DataFrame (we only want actual products, not banners!)
         df_prod, _, _ = process_metrics(df_clean, m)
-        
-        # --- THE DISPLAY TYPE FILTER ---
-        # Exclusively keeps items intentionally labeled as 'ITEM' or 'PRODUCT' to completely lock out banners and CTAs.
         valid_display_types = ['ITEM', 'PRODUCT']
         df_prod = df_prod[df_prod['Display_Type'].astype(str).str.upper().isin(valid_display_types)].copy()
 
@@ -843,7 +840,6 @@ def render_taylors_workspace():
                 df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
-            # Rename columns to strings immediately to avoid duplicate collision 
             df.columns = [str(c).strip() for c in df.columns]
             return df.loc[:, ~df.columns.duplicated()]
 
@@ -851,7 +847,7 @@ def render_taylors_workspace():
         df_fsa = df_fsa.loc[:, ~df_fsa.columns.duplicated()]
         
         if usps_path.endswith('.csv'):
-            df_usps = pd.read_csv(usps_path, dtype=str, low_memory=False) # Forced as string to protect ZIP codes
+            df_usps = pd.read_csv(usps_path, dtype=str, low_memory=False) 
         else:
             df_usps = pd.read_excel(usps_path, dtype=str)
             
@@ -881,7 +877,6 @@ def render_taylors_workspace():
         def safe_pad_zip(z):
             z = str(z).strip().upper().replace(' ', '').replace('.0', '')
             if z == 'NAN' or z == 'NONE': return 'UNKNOWN'
-            # If it is numeric and shorter than 5 digits, pad it with leading zeros
             if z.isdigit() and len(z) < 5:
                 return z.zfill(5)
             return z
@@ -895,14 +890,10 @@ def render_taylors_workspace():
         df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].apply(aggressive_key_clean)
         df_fsa['FSA_Join_Key'] = df_fsa[fsa_desc_col].apply(aggressive_key_clean)
 
-        # Build Unique USPS Mapping Table
         df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
-        
-        # --- PREVENTING DATA EXPLOSION (ROW-BY-ROW FIX) ---
         campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
         campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
         
-        # The expanded regional mapping logic requested by the user
         def assign_custom_region(state_code):
             st_clean = str(state_code).strip().upper()
             if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA']: return 'East'
@@ -912,14 +903,10 @@ def render_taylors_workspace():
             return st_clean 
             
         campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
-        
-        # Drop duplicates based on Region so the join table doesn't explode the products
         campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates()
         
-        # Join product rows to regions
         df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         
-        # --- THE FIX: ARMORED HIGH-SPEED GEOGRAPHIC ROUTER ---
         unmatched_mask = df_prod['Region'].isna()
         if unmatched_mask.any():
             fallback_list = campaign_region_map.dropna(subset=['FSA_Join_Key', 'Region']).values.tolist()
@@ -935,7 +922,6 @@ def render_taylors_workspace():
                         
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         
-        # --- THE PRODUCT NAME SCRUBBER ---
         def taylor_name_scrubber(text):
             text = str(text).lower()
             text = re.sub(r'\(.*?\)', '', text)
@@ -946,7 +932,6 @@ def render_taylors_workspace():
             
         df_prod['Clean_Name'] = df_prod['Name'].apply(taylor_name_scrubber)
         
-        # Taylor's Custom cat_m Logic
         def get_taylor_cat(name, l1, l2):
             text = f"{name} {l1} {l2}".lower()
             if any(w in text for w in ['wine', 'beer', 'spirit', 'liquor', 'vodka', 'whiskey', 'tequila', 'ipa', 'alcohol']): return 'Alcohol'
@@ -968,11 +953,30 @@ def render_taylors_workspace():
             return 'Grocery'
             
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
+
+    # 🚨 DIAGNOSTIC DASHBOARD INJECTION 🚨
+    with st.expander("🛠️ PIPELINE DIAGNOSTICS (Click to expand)"):
+        st.markdown("**1. What Columns Did the Engine Grab?**")
+        st.write(f"- Merch Flyer Column: `{m['run_name']}`")
+        st.write(f"- FSA Flyer Column: `{fsa_desc_col}`")
+        st.write(f"- FSA ZIP Column: `{fsa_zip_col}`")
+        st.write(f"- USPS ZIP Column: `{usps_zip_col}`")
+        st.write(f"- USPS State Column: `{usps_state_col}`")
         
+        st.markdown("**2. ZIP Code Handshake Test**")
+        st.write(f"Total Matches found between FSA file and USPS File: **{len(campaign_zips)}**")
+        if len(campaign_zips) == 0:
+            st.error("🚨 FAILURE: The ZIP codes in the FSA file do not match anything in the USPS file.")
+            st.write("First 5 FSA ZIPs:", df_fsa[fsa_zip_col].head(5).tolist())
+            st.write("First 5 USPS ZIPs:", df_usps[usps_zip_col].head(5).tolist())
+
+        st.markdown("**3. Flyer Name Handshake Test**")
+        st.write("First 5 Flyer Names in Merch File:", df_prod['Flyer_Join_Key'].head(5).tolist())
+        st.write("First 5 Flyer Names in FSA File:", df_fsa['FSA_Join_Key'].head(5).tolist())
+
     st.success("✅ **Data Merged Successfully!** Blank SKUs filtered to actual ITEMS, Product names unified, and regions matched.")
     
     st.write("---")
-    # VISUAL 1: Top Category by Item CTR (Bar Chart)
     st.subheader("📊 Top Categories by Shopper Engagement")
     cat_agg = df_prod.groupby('cat_m').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     cat_agg['Category CTR'] = np.where(cat_agg['Views'] > 0, cat_agg['Clicks'] / cat_agg['Views'], 0)
@@ -982,23 +986,17 @@ def render_taylors_workspace():
     fig_cat.update_layout(yaxis=dict(tickformat='.2%'), xaxis_title="Product Category (cat_m)", yaxis_title="Category CTR")
     st.plotly_chart(fig_cat, use_container_width=True)
 
-    # VISUAL 2A: Top Items by Item CTR 
     st.write("---")
     st.subheader("🏆 Top 10 Items - Shopper Interest by Item CTR")
     top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
     top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
-    
-    # Sort and Display Top 10 by CTR
     st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-    # VISUAL 2B: Top Items by Clicks (New Addition)
     st.write("---")
     st.subheader("🏆 Top 10 Items - Shopper Interest by Clicks")
-    # Sort and Display Top 10 by Absolute Clicks
     st.dataframe(top_items.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-    # VISUAL 3: Category CTR by Region
     st.write("---")
     st.subheader("🗺️ Category Engagement by Region")
     reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
@@ -1010,7 +1008,6 @@ def render_taylors_workspace():
     else:
         st.info("No regional category trends found.")
 
-    # VISUAL 4: Top 5 Items by Region & Item CTR
     st.write("---")
     st.subheader("📍 Top 5 Items by Region & Item CTR")
     unique_regions = [r for r in df_prod['Region'].unique() if pd.notna(r) and r != 'Other']
@@ -1022,13 +1019,10 @@ def render_taylors_workspace():
                 reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                 reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
                 reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
-                
-                # Sliced to 5 items instead of 10
                 reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
                 st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
     else:
         st.info("No localized regional items captured.")
-
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

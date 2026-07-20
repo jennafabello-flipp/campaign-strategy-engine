@@ -436,7 +436,7 @@ def render_single_campaign_matrix():
         item_t_tot = df_prod['TTMs'].sum() if not df_prod.empty else 0
         item_ctr_display = f"{item_cl_tot/item_v_tot:.2%}" if item_v_tot > 0 else "0.00%"
         
-        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🌐 Global Campaign Totals (Includes Banners & Marketing)</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🌐 Overall Campaign Totals (Includes Marketing Assets)</h4>", unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(f"<div class='metric-card'><div class='metric-val'>{v_tot:,.0f}</div><div class='metric-lbl'>TOTAL VIEWS</div></div>", unsafe_allow_html=True)
         c2.markdown(f"<div class='metric-card'><div class='metric-val'>{cl_tot:,.0f}</div><div class='metric-lbl'>TOTAL CLICKS</div></div>", unsafe_allow_html=True)

@@ -426,17 +426,32 @@ def render_single_campaign_matrix():
             f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 items by CTR and absolute Clicks to identify high-performing assets that can be repurposed in future creative."
         )
         
+        # --- NEW TWO-TIERED SUMMARY DASHBOARD ---
         v_tot, cl_tot, cp_tot, t_tot = global_totals['views'], global_totals['clicks'], global_totals['clips'], global_totals['ttms']
         ctr_global_display = f"{cl_tot/v_tot:.2%}" if v_tot > 0 else "0.00%"
         
+        item_v_tot = df_prod['Views'].sum() if not df_prod.empty else 0
+        item_cl_tot = df_prod['Clicks'].sum() if not df_prod.empty else 0
+        item_cp_tot = df_prod['Clips'].sum() if not df_prod.empty else 0
+        item_t_tot = df_prod['TTMs'].sum() if not df_prod.empty else 0
+        item_ctr_display = f"{item_cl_tot/item_v_tot:.2%}" if item_v_tot > 0 else "0.00%"
+        
+        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🌐 Global Campaign Totals (Includes Banners & Marketing)</h4>", unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(f"<div class='metric-card'><div class='metric-val'>{v_tot:,.0f}</div><div class='metric-lbl'>TOTAL VIEWS</div></div>", unsafe_allow_html=True)
         c2.markdown(f"<div class='metric-card'><div class='metric-val'>{cl_tot:,.0f}</div><div class='metric-lbl'>TOTAL CLICKS</div></div>", unsafe_allow_html=True)
-        c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>ADD TO LISTS</div></div>", unsafe_allow_html=True)
+        c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>TOTAL ADD TO LISTS</div></div>", unsafe_allow_html=True)
         c4.markdown(f"<div class='metric-card'><div class='metric-val'>{t_tot:,.0f}</div><div class='metric-lbl'>TOTAL TTMS</div></div>", unsafe_allow_html=True)
-        c5.markdown(f"<div class='metric-card'><div class='metric-val'>{ctr_global_display}</div><div class='metric-lbl'>TOTAL ITEM CTR</div></div>", unsafe_allow_html=True)
+        c5.markdown(f"<div class='metric-card'><div class='metric-val'>{ctr_global_display}</div><div class='metric-lbl'>GLOBAL CTR</div></div>", unsafe_allow_html=True)
         
-        # 🚨 THE NEWLY SEPARATED TOP ITEM TABLES 🚨
+        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🛒 Item-Specific Performance (Products Only)</h4>", unsafe_allow_html=True)
+        i1, i2, i3, i4, i5 = st.columns(5)
+        i1.markdown(f"<div class='metric-card'><div class='metric-val'>{item_v_tot:,.0f}</div><div class='metric-lbl'>TOTAL ITEM VIEWS</div></div>", unsafe_allow_html=True)
+        i2.markdown(f"<div class='metric-card'><div class='metric-val'>{item_cl_tot:,.0f}</div><div class='metric-lbl'>ITEM CLICKS</div></div>", unsafe_allow_html=True)
+        i3.markdown(f"<div class='metric-card'><div class='metric-val'>{item_cp_tot:,.0f}</div><div class='metric-lbl'>ITEM ADD TO LISTS</div></div>", unsafe_allow_html=True)
+        i4.markdown(f"<div class='metric-card'><div class='metric-val'>{item_t_tot:,.0f}</div><div class='metric-lbl'>ITEM TTMS</div></div>", unsafe_allow_html=True)
+        i5.markdown(f"<div class='metric-card'><div class='metric-val'>{item_ctr_display}</div><div class='metric-lbl'>ITEM CTR</div></div>", unsafe_allow_html=True)
+        
         st.write("---")
         st.subheader("🏆 Top 10 Items by Total Clicks (Volume)")
         st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)

@@ -414,8 +414,10 @@ def render_single_campaign_matrix():
     if merch_file and df_clean is not None:
         st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
         
-        top_cat = df_prod.groupby('L1_Category')['Clicks'].sum().idxmax() if not df_prod.empty else "General Merchandise"
-        top_brand = df_prod.groupby('Brand')['Clicks'].sum().idxmax() if not df_prod.empty else "UNKNOWN"
+       cat_clicks = df_prod.groupby('L1_Category')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
+top_cat = cat_clicks.idxmax() if not cat_clicks.empty else "General Merchandise"
+       brand_clicks = df_prod.groupby('Brand')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
+top_brand = brand_clicks.idxmax() if not brand_clicks.empty else "UNKNOWN"
         render_insight_box(
             f"The campaign generated **{global_totals['views']:,.0f} views** and **{global_totals['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(global_totals['clicks']/global_totals['views']) if global_totals['views']>0 else 0:.2%}**.",
             f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity.",

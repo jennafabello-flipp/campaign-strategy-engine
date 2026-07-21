@@ -1099,12 +1099,11 @@ def render_taylors_workspace():
         file_name="Regional_Campaign_Report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    
-    # --------------------------------------------------------------------------
+   # --------------------------------------------------------------------------
     # DASHBOARD RENDERING
     # --------------------------------------------------------------------------
     
-    # 🚨 CAMPAIGN METADATA RECAP 🚨
+    # 🚨 UPDATED CAMPAIGN METADATA RECAP 🚨
     merchant = "Grocery Outlet"
     
     macro_run_col = next((c for c in df_clean.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower()), None)
@@ -1122,10 +1121,15 @@ def render_taylors_workspace():
     
     # 📊 Top Categories Chart
     st.subheader("📊 Top Categories by Shopper Engagement")
+    
+    # Calculate the max CTR and add 0.50% (0.005) headroom so the top tick mark always shows
+    max_cat_ctr = cat_agg['Category CTR'].max() if not cat_agg.empty else 0
+    
     fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', color_discrete_sequence=['#43c4f4'])
     fig_cat.update_layout(
-        title=dict(text='Top Categories by Shopper Engagement', x=0.5, font=dict(family='Plus Jakarta Sans', size=18)),
-        yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005),
+        # 'Arial'
+        title=dict(text='Top Categories by Shopper Engagement', x=0.5, font=dict(family='Arial', size=18)),
+        yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_cat_ctr + 0.005]), 
         xaxis=dict(title=None)
     )
     st.plotly_chart(fig_cat, use_container_width=True)
@@ -1162,11 +1166,15 @@ def render_taylors_workspace():
             st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
             
         with col_chart:
+            # Calculate the max CTR and add headroom for this chart too
+            max_reg_ctr = reg_cat_agg['CTR'].max()
+            
             color_map = {'East': '#00b050', 'West': '#073763', 'Nevada': '#43c4f4', 'Northwest': '#ffaf15', 'Other': '#94a3b8'}
             fig_reg = px.bar(reg_cat_agg, x='cat_m', y='CTR', color='Region', barmode='group', color_discrete_map=color_map)
             fig_reg.update_layout(
-                title=dict(text='Category Engagement by Region', x=0.5, font=dict(family='Plus Jakarta Sans', size=18)),
-                yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005),
+                # TYPE YOUR PREFERRED FONT NAME HERE
+                title=dict(text='Category Engagement by Region', x=0.5, font=dict(family='Arial', size=18)),
+                yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_reg_ctr + 0.005]),
                 xaxis=dict(title=None)
             )
             st.plotly_chart(fig_reg, use_container_width=True)
@@ -1187,8 +1195,8 @@ def render_taylors_workspace():
                 reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
                 st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
     else:
-        st.info("No localized regional items captured.")
-
+        st.info("No localized regional items captured.") 
+   
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS
 # ==============================================================================

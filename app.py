@@ -932,12 +932,12 @@ def render_taylors_workspace():
         campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
         campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
         
-       def assign_custom_region(state_code):
+        def assign_custom_region(state_code):
             st_clean = str(state_code).strip().upper()
             
-            # East Region (+ DC, WV, IN)
-            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DC', 'WV', 'IN', 
-                            'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA', 'DISTRICT OF COLUMBIA', 'WEST VIRGINIA', 'INDIANA']: 
+            # East Region (+ DC, WV, IN, NC)
+            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DC', 'WV', 'IN', 'NC', 
+                            'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA', 'DISTRICT OF COLUMBIA', 'WEST VIRGINIA', 'INDIANA', 'NORTH CAROLINA']: 
                 return 'East'
                 
             # West Region (+ AZ)
@@ -953,26 +953,47 @@ def render_taylors_workspace():
                 return 'Nevada'
                 
             # Any total outliers will be grouped cleanly here instead of showing as isolated states
-            return 'Other' 
+            return 'Other'
             
         campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
-        campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates()
+        
+        # 🚨 Fix: Keep only the primary region for zones that physically cross state borders to prevent metric duplication
+        campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates(subset=['FSA_Join_Key'], keep='first')
         
         df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         
-        # Soft-fallback geographic routing if exact match misses
+        # 🚨 Fix: Upgraded Smarter Matching Logic for missed connections
         unmatched_mask = df_prod['Region'].isna()
         if unmatched_mask.any():
             fallback_list = campaign_region_map.dropna(subset=['FSA_Join_Key', 'Region']).values.tolist()
-            def fast_fuzzy(m_key):
-                m_str = str(m_key).strip()
-                if not m_str or m_str.upper() in ['NAN', 'NONE']: return 'Other'
+            def smarter_match(m_key):
+                m_str = str(m_key).strip().lower()
+                if not m_str or m_str in ['nan', 'none']: return 'Other'
+                
+                # 1. Exact Mathematical Number Matching
+                m_nums = set([str(int(n)) for n in re.findall(r'\d+', m_str)])
                 for f_key, reg in fallback_list:
-                    f_str = str(f_key).strip()
-                    if f_str and (f_str in m_str or m_str in f_str):
+                    f_nums = set([str(int(n)) for n in re.findall(r'\d+', str(f_key))])
+                    if f_nums and f_nums.issubset(m_nums):
                         return reg
+                        
+                # 2. Exact Word Boundary Matching (for text keys)
+                m_words = set(re.findall(r'\b\w+\b', m_str))
+                for f_key, reg in fallback_list:
+                    f_words = set(re.findall(r'\b\w+\b', str(f_key).lower()))
+                    if f_words and f_words.issubset(m_words):
+                        return reg
+                        
+                # 3. Final Fallback (only for long strings to prevent small number collision)
+                for f_key, reg in fallback_list:
+                    f_clean = str(f_key).strip().lower()
+                    if len(f_clean) >= 4 and f_clean in m_str:
+                        return reg
+
                 return 'Other'
-            df_prod.loc[unmatched_mask, 'Region'] = df_prod.loc[unmatched_mask, 'Flyer_Join_Key'].apply(fast_fuzzy)
+                
+            # Use original flyer description with spaces intact for accurate word/number extraction
+            df_prod.loc[unmatched_mask, 'Region'] = df_prod.loc[unmatched_mask, 'Flyer_Description'].apply(smarter_match)
                         
         df_prod['Region'] = df_prod['Region'].fillna('Other')
         

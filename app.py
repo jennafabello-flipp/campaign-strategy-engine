@@ -138,6 +138,23 @@ def process_metrics(df, m):
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
 
+    # 🚨 THE NEW LINK-TO-PRODUCT MERGER 🚨
+    # 1. Create a mapping of actual Products to their assigned SKUs
+    actual_products = df[df['Display_Type'].isin(['ITEM', 'PRODUCT'])]
+    name_to_sku = {}
+    
+    for name, group in actual_products.groupby('Name'):
+        skus = group['SKU'].unique()
+        if len(skus) == 1:  # Only map if there's no ambiguity
+            name_to_sku[name] = skus[0]
+
+    # 2. If a LINK shares a name with an ITEM, overwrite the LINK's fake SKU with the real ITEM's SKU
+    is_link = df['Display_Type'] == 'LINK'
+    df.loc[is_link, 'SKU'] = df.loc[is_link].apply(
+        lambda row: name_to_sku[row['Name']] if row['Name'] in name_to_sku else row['SKU'], 
+        axis=1
+    )
+
     def get_l1(row):
         for key in ['c1', 'ret_cat', 'goo_l1']:
             if m[key] and pd.notna(row[m[key]]):
@@ -166,24 +183,22 @@ def process_metrics(df, m):
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
     # 🚨 STRICT PRODUCT WHITELIST LOGIC 🚨
+    is_standard_item = df['Display_Type'].isin(['ITEM', 'PRODUCT'])
+    
     if m.get('sku') and m['sku'] in df.columns:
         raw_sku = df[m['sku']].astype(str).str.strip().str.lower()
         has_raw_sku = ~raw_sku.isin(['nan', 'none', '', 'null', '0', '0.0', 'unknown'])
     else:
         has_raw_sku = pd.Series(False, index=df.index)
         
-    # 1. Standard Products
-    is_standard_item = df['Display_Type'].isin(['ITEM', 'PRODUCT'])
-    item_names = df[is_standard_item]['Name'].unique()
+    # A Link is only shoppable if it successfully inherited a real product's SKU or has its own
+    is_mapped_link = is_link & df['Name'].isin(name_to_sku.keys())
+    is_shoppable_link = is_link & (has_raw_sku | is_mapped_link)
     
-    # 2. Shoppable Links (Links with real SKUs or matching a Product Name)
-    is_shoppable_link = (df['Display_Type'] == 'LINK') & (has_raw_sku | df['Name'].isin(item_names))
-    
-    # 3. Create the Strict Whitelist
     is_valid_product = is_standard_item | is_shoppable_link
     
-    # 4. Force actual Banners out, just in case
-    is_banner = df['Name'].str.contains('BANNER', case=False, na=False) | df['Display_Type'].str.contains('BANNER', case=False, na=False)
+    # Force generic assets like Banners and Pages out
+    is_banner = df['Name'].str.contains('BANNER', case=False, na=False) | df['Display_Type'].str.contains('BANNER|PAGE|WIDGET|HOTSPOT', case=False, na=False)
     is_valid_product = is_valid_product & ~is_banner
 
     df_prod = df[is_valid_product].copy()

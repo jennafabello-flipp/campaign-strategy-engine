@@ -165,25 +165,34 @@ def process_metrics(df, m):
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
-    # 🚨 THE NEW SHOPPABLE LINK LOGIC 🚨
-    # Check if the raw file provided a valid SKU for this row
+    # 🚨 STRICT PRODUCT WHITELIST LOGIC 🚨
     if m.get('sku') and m['sku'] in df.columns:
         raw_sku = df[m['sku']].astype(str).str.strip().str.lower()
         has_raw_sku = ~raw_sku.isin(['nan', 'none', '', 'null', '0', '0.0', 'unknown'])
     else:
         has_raw_sku = pd.Series(False, index=df.index)
         
-    # Get a list of all products
-    item_names = df[df['Display_Type'].isin(['ITEM', 'PRODUCT'])]['Name'].unique()
+    # 1. Standard Products
+    is_standard_item = df['Display_Type'].isin(['ITEM', 'PRODUCT'])
+    item_names = df[is_standard_item]['Name'].unique()
     
-    # A link is a Shoppable Product if it has an SKU -OR- shares an exact name with an ITEM
-    is_product_link = (df['Display_Type'] == "LINK") & (has_raw_sku | df['Name'].isin(item_names))
+    # 2. Shoppable Links (Links with real SKUs or matching a Product Name)
+    is_shoppable_link = (df['Display_Type'] == 'LINK') & (has_raw_sku | df['Name'].isin(item_names))
     
-    # Pure marketing banners are LINKs that are NOT products, plus anything specifically named BANNER
-    is_marketing_link = ((df['Display_Type'] == "LINK") & ~is_product_link) | (df['Name'].str.contains('BANNER', case=False, na=False))
+    # 3. Create the Strict Whitelist
+    is_valid_product = is_standard_item | is_shoppable_link
     
-    return df[~is_marketing_link].copy(), df[is_marketing_link].copy(), global_totals
+    # 4. Force actual Banners out, just in case
+    is_banner = df['Name'].str.contains('BANNER', case=False, na=False) | df['Display_Type'].str.contains('BANNER', case=False, na=False)
+    is_valid_product = is_valid_product & ~is_banner
 
+    df_prod = df[is_valid_product].copy()
+    df_creative = df[~is_valid_product].copy()
+    
+    # Scrub the fake SKUs from the creative bucket to prevent confusion
+    df_creative['SKU'] = "MARKETING_ASSET"
+    
+    return df_prod, df_creative, global_totals
 
 def extract_exact_metadata(df_clean):
     try:

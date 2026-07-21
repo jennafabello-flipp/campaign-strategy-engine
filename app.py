@@ -874,24 +874,38 @@ def render_taylors_workspace():
         df_usps.columns = [str(c).strip() for c in df_usps.columns]
         df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
         
-        # 3. Column Identification Helper
-        def get_col_fuzzy(df, keywords, exclude_cols=None):
+        # 3. SMARTER Column Identification Helper
+        def get_col_fuzzy_strict(df, keywords, exclude_cols=None):
             exclude_cols = exclude_cols or []
-            for col in df.columns:
-                if col not in exclude_cols and str(col).strip().lower() in keywords: return col
-            for col in df.columns:
-                if col not in exclude_cols and any(k in str(col).lower() for k in keywords): return col
-            for col in df.columns:
-                if col not in exclude_cols: return col
-            fallback_name = f"Missing_Data_Shield_{len(exclude_cols)}"
-            df[fallback_name] = "UNKNOWN"
-            return fallback_name
+            # Exact Match First
+            for k in keywords:
+                for col in df.columns:
+                    if col not in exclude_cols and str(col).strip().lower() == k: return col
+            # Contains Match Second
+            for k in keywords:
+                for col in df.columns:
+                    if col not in exclude_cols and k in str(col).lower(): return col
+            return "UNKNOWN"
 
-        fsa_desc_col = get_col_fuzzy(df_fsa, ['description', 'pricing zone', 'flyer', 'campaign', 'name'])
-        fsa_zip_col = get_col_fuzzy(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=[fsa_desc_col])
+        # Explicitly target 'pricing zone name' before anything else
+        fsa_desc_col = get_col_fuzzy_strict(df_fsa, ['pricing zone name', 'description', 'flyer', 'campaign', 'name', 'zone'])
+        if fsa_desc_col == "UNKNOWN":
+            fsa_desc_col = df_fsa.columns[0] # Fallback to first column if totally lost
 
-        usps_zip_col = get_col_fuzzy(df_usps, ['fsa', 'zip', 'postal'])
-        usps_state_col = get_col_fuzzy(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
+        # Find and exclude the ID column so we don't accidentally grab it later
+        exclude_cols = [fsa_desc_col]
+        id_col = get_col_fuzzy_strict(df_fsa, ['pricing zone id', 'id'])
+        if id_col != "UNKNOWN": exclude_cols.append(id_col)
+
+        fsa_zip_col = get_col_fuzzy_strict(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=exclude_cols)
+        if fsa_zip_col == "UNKNOWN":
+            fsa_zip_col = [c for c in df_fsa.columns if c not in exclude_cols][0]
+
+        usps_zip_col = get_col_fuzzy_strict(df_usps, ['fsa', 'zip', 'postal'])
+        if usps_zip_col == "UNKNOWN": usps_zip_col = df_usps.columns[0]
+        
+        usps_state_col = get_col_fuzzy_strict(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
+        if usps_state_col == "UNKNOWN": usps_state_col = [c for c in df_usps.columns if c != usps_zip_col][0]
 
         # --- ARMORED KEY CLEANING & ZIP CODE PADDING ---
         def safe_pad_zip(z):
@@ -905,7 +919,11 @@ def render_taylors_workspace():
         df_usps[usps_zip_col] = df_usps[usps_zip_col].apply(safe_pad_zip)
 
         def aggressive_key_clean(s):
-            return re.sub(r'[^A-Z0-9]', '', str(s).upper())
+            cleaned = re.sub(r'[^A-Z0-9]', '', str(s).upper())
+            # Strip the word "ZONE" if it exists, so "ZONE3" perfectly matches "3"
+            if cleaned.startswith("ZONE") and len(cleaned) > 4:
+                cleaned = cleaned.replace("ZONE", "")
+            return cleaned
             
         df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].apply(aggressive_key_clean)
         df_fsa['FSA_Join_Key'] = df_fsa[fsa_desc_col].apply(aggressive_key_clean)
@@ -927,6 +945,7 @@ def render_taylors_workspace():
         
         df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
         
+        # Soft-fallback geographic routing if exact match misses
         unmatched_mask = df_prod['Region'].isna()
         if unmatched_mask.any():
             fallback_list = campaign_region_map.dropna(subset=['FSA_Join_Key', 'Region']).values.tolist()

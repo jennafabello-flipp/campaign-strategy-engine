@@ -808,6 +808,8 @@ def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
     
+    dl_placeholder = st.empty()  # 🚨 THE NEW DOWNLOAD BUTTON PLACEHOLDER
+    
     col1, col2 = st.columns(2)
     with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
     with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
@@ -1051,21 +1053,68 @@ def render_taylors_workspace():
 
     st.success("✅ **Data Merged Successfully!** Blank SKUs filtered to actual ITEMS, Product names unified, and regions matched.")
     
-    st.write("---")
-    st.subheader("📊 Top Categories by Shopper Engagement")
+    # --------------------------------------------------------------------------
+    # DATA AGGREGATIONS
+    # --------------------------------------------------------------------------
     cat_agg = df_prod.groupby('cat_m').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     cat_agg['Category CTR'] = np.where(cat_agg['Views'] > 0, cat_agg['Clicks'] / cat_agg['Views'], 0)
-    cat_agg = cat_agg.sort_values(by='Category CTR', ascending=False).head(15)
     
-    fig_cat = px.bar(cat_agg, x='cat_m', y='Category CTR', title='Top Categories by Shopper Engagement', color_discrete_sequence=['#0054B7'])
+    top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
+    top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
+
+    reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    reg_cat_agg['CTR'] = np.where(reg_cat_agg['Views'] > 0, reg_cat_agg['Clicks'] / reg_cat_agg['Views'], 0)
+
+    # 🚨 REGIONAL EXCEL EXPORT GENERATOR 🚨
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if not cat_agg.empty:
+            cat_agg.sort_values(by='Category CTR', ascending=False).to_excel(writer, sheet_name='Top Categories', index=False)
+        
+        if not top_items.empty:
+            top_items.sort_values(by='Item CTR', ascending=False).to_excel(writer, sheet_name='Top Items by CTR', index=False)
+            top_items.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Top Items by Clicks', index=False)
+            
+        if not reg_cat_agg.empty:
+            pivot_reg_export = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0).reset_index()
+            pivot_reg_export.to_excel(writer, sheet_name='Category CTR by Region', index=False)
+            
+        # Build a master list of all regional item performance
+        reg_items_full = df_prod.groupby(['Region', 'Clean_Name']).agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+        reg_items_full.rename(columns={'Clean_Name': 'Product Name', 'cat_m': 'Category'}, inplace=True)
+        reg_items_full['Item CTR'] = np.where(reg_items_full['Views'] > 0, reg_items_full['Clicks'] / reg_items_full['Views'], 0)
+        reg_items_full = reg_items_full.sort_values(by=['Region', 'Item CTR'], ascending=[True, False])
+        reg_items_full.to_excel(writer, sheet_name='All Items by Region', index=False)
+
+    output.seek(0)
+    dl_placeholder.download_button(
+        label="⬇️ Download Regional Dashboard Report (.xlsx)",
+        data=output,
+        file_name="Regional_Campaign_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    # --------------------------------------------------------------------------
+    # DASHBOARD RENDERING
+    # --------------------------------------------------------------------------
+    # 🚨 CAMPAIGN METADATA RECAP 🚨
+    merchant, run_name, run_id, date_from, date_to = extract_exact_metadata(df_clean)
+    
+    # Extract every unique flyer description/zone to explicitly show what's being analyzed
+    unique_runs = df_prod['Flyer_Description'].dropna().unique()
+    runs_display = ", ".join([str(x) for x in unique_runs]) if len(unique_runs) > 0 else run_name
+    
+    st.info(f"📍 **REGIONAL FLIGHT RECAP:** {merchant}  |  **Included Runs:** {runs_display}  |  **Window:** {date_from} to {date_to}")
+    
+    st.write("---")
+    st.subheader("📊 Top Categories by Shopper Engagement")
+    fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', title='Top Categories by Shopper Engagement', color_discrete_sequence=['#0054B7'])
     fig_cat.update_layout(yaxis=dict(tickformat='.2%'), xaxis_title="Product Category (cat_m)", yaxis_title="Category CTR")
     st.plotly_chart(fig_cat, use_container_width=True)
 
     st.write("---")
     st.subheader("🏆 Top 10 Items - Shopper Interest by Item CTR")
-    top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-    top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
-    top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
     st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
     st.write("---")
@@ -1074,9 +1123,6 @@ def render_taylors_workspace():
 
     st.write("---")
     st.subheader("🗺️ Category Engagement by Region")
-    reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-    reg_cat_agg['CTR'] = np.where(reg_cat_agg['Views'] > 0, reg_cat_agg['Clicks'] / reg_cat_agg['Views'], 0)
-    
     if not reg_cat_agg.empty:
         pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
         st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)

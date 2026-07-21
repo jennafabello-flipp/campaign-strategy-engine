@@ -165,32 +165,12 @@ def process_metrics(df, m):
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
-    # 🚨 STRICT PRODUCT WHITELIST LOGIC 🚨
-    if m.get('sku') and m['sku'] in df.columns:
-        raw_sku = df[m['sku']].astype(str).str.strip().str.lower()
-        has_raw_sku = ~raw_sku.isin(['nan', 'none', '', 'null', '0', '0.0', 'unknown'])
-    else:
-        has_raw_sku = pd.Series(False, index=df.index)
-        
-    # 1. Standard Products
-    is_standard_item = df['Display_Type'].isin(['ITEM', 'PRODUCT'])
-    item_names = df[is_standard_item]['Name'].unique()
+    # 🚨 REVERTED TO ORIGINAL DAY-ONE LOGIC 🚨
+    # Strictly split Banners/Links into df_creative, and everything else into df_prod
+    is_creative = df['Display_Type'].isin(['BANNER', 'LINK']) | df['Name'].str.contains('BANNER', case=False, na=False)
     
-    # 2. Shoppable Links (Links with real SKUs or matching a Product Name)
-    is_shoppable_link = (df['Display_Type'] == 'LINK') & (has_raw_sku | df['Name'].isin(item_names))
-    
-    # 3. Create the Strict Whitelist
-    is_valid_product = is_standard_item | is_shoppable_link
-    
-    # 4. Force actual Banners out, just in case
-    is_banner = df['Name'].str.contains('BANNER', case=False, na=False) | df['Display_Type'].str.contains('BANNER|PAGE|WIDGET|HOTSPOT', case=False, na=False)
-    is_valid_product = is_valid_product & ~is_banner
-
-    df_prod = df[is_valid_product].copy()
-    df_creative = df[~is_valid_product].copy()
-    
-    # Scrub the fake SKUs from the creative bucket to prevent confusion
-    df_creative['SKU'] = "MARKETING_ASSET"
+    df_prod = df[~is_creative].copy()
+    df_creative = df[is_creative].copy()
     
     return df_prod, df_creative, global_totals
 

@@ -800,7 +800,6 @@ def render_head_to_head_variance():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================
@@ -1098,14 +1097,20 @@ def render_taylors_workspace():
     # --------------------------------------------------------------------------
     # DASHBOARD RENDERING
     # --------------------------------------------------------------------------
-    # 🚨 CAMPAIGN METADATA RECAP 🚨
-    merchant, run_name, run_id, date_from, date_to = extract_exact_metadata(df_clean)
     
-    # Extract every unique flyer description/zone to explicitly show what's being analyzed
-    unique_runs = df_prod['Flyer_Description'].dropna().unique()
-    runs_display = ", ".join([str(x) for x in unique_runs]) if len(unique_runs) > 0 else run_name
+    # 🚨 UPDATED CAMPAIGN METADATA RECAP 🚨
+    merchant = "Grocery Outlet"
     
-    st.info(f"📍 **REGIONAL FLIGHT RECAP:** {merchant}  |  **Included Runs:** {runs_display}  |  **Window:** {date_from} to {date_to}")
+    macro_run_col = next((c for c in df_clean.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower()), None)
+    runs_display = ", ".join([str(x) for x in df_clean[macro_run_col].dropna().unique()]) if macro_run_col else "Unknown Campaign"
+
+    date_from_col = next((c for c in df_clean.columns if 'available from' in str(c).lower() or 'start date' in str(c).lower()), None)
+    date_to_col = next((c for c in df_clean.columns if 'available to' in str(c).lower() or 'end date' in str(c).lower()), None)
+
+    date_from = pd.to_datetime(df_clean[date_from_col], errors='coerce').min().strftime('%b %d, %Y') if date_from_col else "N/A"
+    date_to = pd.to_datetime(df_clean[date_to_col], errors='coerce').max().strftime('%b %d, %Y') if date_to_col else "N/A"
+
+    st.info(f"📍 **REGIONAL FLIGHT RECAP:** {merchant}  |  **Flyer Run Name(s):** {runs_display}  |  **Window:** {date_from} to {date_to}")
     
     st.write("---")
     st.subheader("📊 Top Categories by Shopper Engagement")
@@ -1144,6 +1149,7 @@ def render_taylors_workspace():
                 st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
     else:
         st.info("No localized regional items captured.")
+
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

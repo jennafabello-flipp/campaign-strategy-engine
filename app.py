@@ -1058,8 +1058,14 @@ def render_taylors_workspace():
     cat_agg = df_prod.groupby('cat_m').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
     cat_agg['Category CTR'] = np.where(cat_agg['Views'] > 0, cat_agg['Clicks'] / cat_agg['Views'], 0)
     
-    top_items = df_prod.groupby('Clean_Name').agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-    top_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
+    # 🚨 UPDATED: Grouping now pulls in the average Current Price for the item
+    top_items = df_prod.groupby('Clean_Name').agg({
+        'cat_m': 'first', 
+        'Curr_Price': 'mean', 
+        'Views': 'sum', 
+        'Clicks': 'sum'
+    }).reset_index()
+    top_items.rename(columns={'Clean_Name': 'Product Name', 'cat_m': 'Category', 'Curr_Price': 'Price'}, inplace=True)
     top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
 
     reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
@@ -1098,7 +1104,7 @@ def render_taylors_workspace():
     # DASHBOARD RENDERING
     # --------------------------------------------------------------------------
     
-    # 🚨 UPDATED CAMPAIGN METADATA RECAP 🚨
+    # 🚨 CAMPAIGN METADATA RECAP 🚨
     merchant = "Grocery Outlet"
     
     macro_run_col = next((c for c in df_clean.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower()), None)
@@ -1113,24 +1119,57 @@ def render_taylors_workspace():
     st.info(f"📍 **REGIONAL FLIGHT RECAP:** {merchant}  |  **Flyer Run Name(s):** {runs_display}  |  **Window:** {date_from} to {date_to}")
     
     st.write("---")
+    
+    # 📊 Top Categories Chart
     st.subheader("📊 Top Categories by Shopper Engagement")
-    fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', title='Top Categories by Shopper Engagement', color_discrete_sequence=['#0054B7'])
-    fig_cat.update_layout(yaxis=dict(tickformat='.2%'), xaxis_title="Product Category (cat_m)", yaxis_title="Category CTR")
+    fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', color_discrete_sequence=['#43c4f4'])
+    fig_cat.update_layout(
+        title=dict(text='Top Categories by Shopper Engagement', x=0.5, font=dict(family='Plus Jakarta Sans', size=18)),
+        yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005),
+        xaxis=dict(title=None)
+    )
     st.plotly_chart(fig_cat, use_container_width=True)
 
     st.write("---")
+    
+    # 🏆 Top 10 by CTR
     st.subheader("🏆 Top 10 Items - Shopper Interest by Item CTR")
-    st.dataframe(top_items.sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    top_10_ctr = top_items.sort_values(by='Item CTR', ascending=False).head(10)
+    avg_ctr_10 = top_10_ctr['Item CTR'].mean() if not top_10_ctr.empty else 0
+    st.metric(label="Avg. Item CTR (Top 10)", value=f"{avg_ctr_10:.2%}")
+    st.dataframe(top_10_ctr[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
     st.write("---")
+    
+    # 🏆 Top 10 by Clicks
     st.subheader("🏆 Top 10 Items - Shopper Interest by Clicks")
-    st.dataframe(top_items.sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    top_10_clicks = top_items.sort_values(by='Clicks', ascending=False).head(10)
+    avg_clicks_10 = top_10_clicks['Clicks'].mean() if not top_10_clicks.empty else 0
+    st.metric(label="Avg. Item Clicks (Top 10)", value=f"{avg_clicks_10:,.0f}")
+    st.dataframe(top_10_clicks[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
     st.write("---")
+    
+    # 🗺️ Category Engagement by Region (Table & Chart Side-by-Side)
     st.subheader("🗺️ Category Engagement by Region")
     if not reg_cat_agg.empty:
+        col_tbl, col_chart = st.columns(2)
+        
         pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
-        st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+        
+        with col_tbl:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacing alignment
+            st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+            
+        with col_chart:
+            color_map = {'East': '#00b050', 'West': '#073763', 'Nevada': '#43c4f4', 'Northwest': '#ffaf15', 'Other': '#94a3b8'}
+            fig_reg = px.bar(reg_cat_agg, x='cat_m', y='CTR', color='Region', barmode='group', color_discrete_map=color_map)
+            fig_reg.update_layout(
+                title=dict(text='Category Engagement by Region', x=0.5, font=dict(family='Plus Jakarta Sans', size=18)),
+                yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005),
+                xaxis=dict(title=None)
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
     else:
         st.info("No regional category trends found.")
 
@@ -1149,7 +1188,6 @@ def render_taylors_workspace():
                 st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
     else:
         st.info("No localized regional items captured.")
-
 
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

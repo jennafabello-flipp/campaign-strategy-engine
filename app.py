@@ -1128,7 +1128,7 @@ def render_taylors_workspace():
     fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', color_discrete_sequence=['#43c4f4'])
     fig_cat.update_layout(
         # 'Arial'
-        title=dict(text='Top Categories by Shopper Engagement', x=0.5, font=dict(family='Arial', size=18)),
+        title=dict(text='Top Categories by Shopper Engagement', x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)),
         yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_cat_ctr + 0.005]), 
         xaxis=dict(title=None)
     )
@@ -1173,7 +1173,7 @@ def render_taylors_workspace():
             fig_reg = px.bar(reg_cat_agg, x='cat_m', y='CTR', color='Region', barmode='group', color_discrete_map=color_map)
             fig_reg.update_layout(
                 # TYPE YOUR PREFERRED FONT NAME HERE
-                title=dict(text='Category Engagement by Region', x=0.5, font=dict(family='Arial', size=18)),
+                title=dict(text='Category Engagement by Region', x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)),
                 yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_reg_ctr + 0.005]),
                 xaxis=dict(title=None)
             )

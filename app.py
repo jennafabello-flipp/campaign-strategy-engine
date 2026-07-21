@@ -91,7 +91,6 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
     except Exception as e:
         st.error(f"Error scrubbing file setup: {str(e)}")
         return None, None, None
-
 def process_metrics(df, m):
     df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
     df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] else "PRODUCT"
@@ -166,8 +165,25 @@ def process_metrics(df, m):
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
-    is_marketing_link = (df['Display_Type'] == "LINK") | (df['Name'].str.contains('BANNER', case=False, na=False))
+    # 🚨 THE NEW SHOPPABLE LINK LOGIC 🚨
+    # Check if the raw file provided a valid SKU for this row
+    if m.get('sku') and m['sku'] in df.columns:
+        raw_sku = df[m['sku']].astype(str).str.strip().str.lower()
+        has_raw_sku = ~raw_sku.isin(['nan', 'none', '', 'null', '0', '0.0', 'unknown'])
+    else:
+        has_raw_sku = pd.Series(False, index=df.index)
+        
+    # Get a list of all products
+    item_names = df[df['Display_Type'].isin(['ITEM', 'PRODUCT'])]['Name'].unique()
+    
+    # A link is a Shoppable Product if it has an SKU -OR- shares an exact name with an ITEM
+    is_product_link = (df['Display_Type'] == "LINK") & (has_raw_sku | df['Name'].isin(item_names))
+    
+    # Pure marketing banners are LINKs that are NOT products, plus anything specifically named BANNER
+    is_marketing_link = ((df['Display_Type'] == "LINK") & ~is_product_link) | (df['Name'].str.contains('BANNER', case=False, na=False))
+    
     return df[~is_marketing_link].copy(), df[is_marketing_link].copy(), global_totals
+
 
 def extract_exact_metadata(df_clean):
     try:

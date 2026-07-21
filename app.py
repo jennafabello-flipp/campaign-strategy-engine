@@ -932,13 +932,28 @@ def render_taylors_workspace():
         campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
         campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
         
-        def assign_custom_region(state_code):
+       def assign_custom_region(state_code):
             st_clean = str(state_code).strip().upper()
-            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA']: return 'East'
-            if st_clean in ['CA', 'CALIFORNIA']: return 'West'
-            if st_clean in ['ID', 'OR', 'WA', 'IDAHO', 'OREGON', 'WASHINGTON']: return 'Northwest'
-            if st_clean in ['LV', 'NV', 'NEVADA', 'LAS VEGAS']: return 'Nevada'
-            return st_clean 
+            
+            # East Region (+ DC, WV, IN)
+            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DC', 'WV', 'IN', 
+                            'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA', 'DISTRICT OF COLUMBIA', 'WEST VIRGINIA', 'INDIANA']: 
+                return 'East'
+                
+            # West Region (+ AZ)
+            if st_clean in ['CA', 'AZ', 'CALIFORNIA', 'ARIZONA']: 
+                return 'West'
+                
+            # Northwest Region (+ MT)
+            if st_clean in ['ID', 'OR', 'WA', 'MT', 'IDAHO', 'OREGON', 'WASHINGTON', 'MONTANA']: 
+                return 'Northwest'
+                
+            # Nevada Region
+            if st_clean in ['LV', 'NV', 'NEVADA', 'LAS VEGAS']: 
+                return 'Nevada'
+                
+            # Any total outliers will be grouped cleanly here instead of showing as isolated states
+            return 'Other' 
             
         campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
         campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates()

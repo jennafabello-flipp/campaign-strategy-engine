@@ -78,7 +78,7 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
             'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
             'date': get_col(['Daily Available From', 'Date', 'Start Date']),
             'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
-            'run_name': get_col(['Flyer Run Name', 'Flyer Description', 'Campaign Name']),
+            'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
             'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
             'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),

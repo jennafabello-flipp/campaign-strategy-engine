@@ -367,15 +367,17 @@ def render_single_campaign_matrix():
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-            p_agg['Click Share %'] = p_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
-            p_agg['List Share %'] = p_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
-            p_agg['TTM Share %'] = p_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
+            # 🚨 UPDATED DENOMINATOR: Now divides by the sum of the actual items in the tiers, just like Excel
+            p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0
+            p_agg['List Share %'] = p_agg['Clips'] / p_agg['Clips'].sum() if p_agg['Clips'].sum() > 0 else 0
+            p_agg['TTM Share %'] = p_agg['TTMs'] / p_agg['TTMs'].sum() if p_agg['TTMs'].sum() > 0 else 0
             p_agg = p_agg[p_agg['Items'] > 0]
 
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-            d_agg['Click Share %'] = d_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
-            d_agg['List Share %'] = d_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
-            d_agg['TTM Share %'] = d_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
+            # 🚨 UPDATED DENOMINATOR: Now divides by the sum of the actual items in the tiers
+            d_agg['Click Share %'] = d_agg['Clicks'] / d_agg['Clicks'].sum() if d_agg['Clicks'].sum() > 0 else 0
+            d_agg['List Share %'] = d_agg['Clips'] / d_agg['Clips'].sum() if d_agg['Clips'].sum() > 0 else 0
+            d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
             d_agg = d_agg[d_agg['Items'] > 0]
 
     if scroll_file:

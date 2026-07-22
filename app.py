@@ -914,7 +914,16 @@ def render_head_to_head_variance():
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================
-
+# 🚨 MEMORY SAVER: Cache the USPS reference file so it only loads into RAM once!
+@st.cache_data
+def load_usps_reference(path):
+    if path.endswith('.csv'):
+        df = pd.read_csv(path, dtype=str, low_memory=False) 
+    else:
+        df = pd.read_excel(path, dtype=str)
+    df.columns = [str(c).strip() for c in df.columns]
+    return df.loc[:, ~df.columns.duplicated()]
+    
 def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
@@ -977,13 +986,7 @@ def render_taylors_workspace():
         df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
         df_fsa = df_fsa.loc[:, ~df_fsa.columns.duplicated()]
 
-        if usps_path.endswith('.csv'):
-            df_usps = pd.read_csv(usps_path, dtype=str, low_memory=False) 
-        else:
-            df_usps = pd.read_excel(usps_path, dtype=str)
-
-        df_usps.columns = [str(c).strip() for c in df_usps.columns]
-        df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
+        df_usps = load_usps_reference(usps_path)
 
         # 3. SMARTER Column Identification Helper
         def get_col_fuzzy_strict(df, keywords, exclude_cols=None):

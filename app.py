@@ -909,11 +909,8 @@ def render_head_to_head_variance():
                 xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
-            st.plotly_chart(fig, use_container_width=True)
+ st.plotly_chart(fig, use_container_width=True)
 
-def render_taylors_workspace():
-    st.markdown(...) # <--- 4 spaces here!
-    dl_placeholder = st.empty() # <--- 4 spaces here!
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================
@@ -922,7 +919,7 @@ def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
 
-    dl_placeholder = st.empty()  
+    dl_placeholder = st.empty()
 
     col1, col2 = st.columns(2)
     with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])

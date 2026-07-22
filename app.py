@@ -1105,24 +1105,37 @@ def render_taylors_workspace():
         # Safely assign to your existing expected column 'cat_m'
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
         # This reads your reclassified_products.xlsx file and forces the engine to respect your choices
-        override_filepath = "reclassified_products.xlsx"
+        override_filepath = "reclassified_products_2.xlsx"
+        
         if os.path.exists(override_filepath):
             try:
                 df_overrides = pd.read_excel(override_filepath)
-                # Create a master dictionary mapping 'Name' to 'Reassigned Category'
+                
+                # 🛡️ BULLETPROOFING: Convert the Excel names to raw, lowercase, stripped text
                 override_dict = dict(zip(
-                    df_overrides['Name'].astype(str).str.strip(), 
+                    df_overrides['Name'].astype(str).str.lower().str.strip(), 
                     df_overrides['Reassigned Category'].astype(str).str.strip()
                 ))
                 
-                # Apply the override: If the name is in your file, use your category. Otherwise, keep the engine's guess.
                 def apply_taylors_override(row):
-                    item_name = str(row['Clean_Name']).strip()
+                    # 🛡️ BULLETPROOFING: Convert the live engine name to raw, lowercase, stripped text
+                    item_name = str(row['Clean_Name']).lower().strip()
+                    
                     if item_name in override_dict and pd.notna(override_dict[item_name]):
                         return override_dict[item_name]
                     return row['cat_m']
                     
+                # 1. Update Taylor's column
                 df_prod['cat_m'] = df_prod.apply(apply_taylors_override, axis=1)
+                
+                # 2. GLOBAL SYNC
+                df_prod['L1_Category'] = df_prod['cat_m']
+                df_prod['Category'] = df_prod['cat_m']
+                
+                # 3. Push to Session State
+                if 'df_prod' in st.session_state:
+                    st.session_state['df_prod'] = df_prod
+                    
             except Exception as e:
                 st.warning(f"⚠️ Found the override file, but couldn't read it: {e}")
 

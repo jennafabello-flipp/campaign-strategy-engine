@@ -912,117 +912,567 @@ def render_head_to_head_variance():
             st.plotly_chart(fig, use_container_width=True)
 
 def render_taylors_workspace():
-    # ==========================================
-    # MODULE 4: TAYLOR'S WORKSPACE
-    # ==========================================
-    st.header("🛠️ Taylor's Workspace")
-    
-    # Check if df_prod exists in session state (standard for Streamlit apps)
-    if 'df_prod' in st.session_state:
-        df_prod = st.session_state['df_prod']
-    else:
-        st.error("Data not loaded. Please upload the campaign data first.")
+# ==============================================================================
+# 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
+# ==============================================================================
+# ---> THIS IS YOUR EXISTING HEADER/START OF TAYLOR'S MODULE <---
+        st.header("Taylor's Workspace") 
+        # (or def render_taylors_workspace(): depending on your setup)
+
+        # 🚨 PASTE THE ENGINE EXACTLY HERE 🚨
+# ==========================================
+        # MODULE 4: TAYLOR'S WORKSPACE
+        # ==========================================
+        st.header("🛠️ Taylor's Workspace")
+        
+        # --- 1. ISOLATE DATA & APPLY CATEGORIZATION ENGINE ---
+        df_taylor = df_prod.copy()
+        
+        def assign_taylors_categories(row):
+            name = str(row['Name']).lower()
+            if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat']): return 'Pet'
+            elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']): return 'Alcohol'
+            elif 'bacon' in name: return 'Bacon'
+            elif any(word in name for word in ['butter', 'margarine', 'ghee']) and not any(w in name for w in ['peanut', 'almond']): return 'Butter'
+            elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']): return 'Ice Cream'
+            elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']): return 'Dairy'
+            elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']): return 'Cheese'
+            elif 'egg' in name and not any(w in name for w in ['chocolate', 'easter', 'cadbury']): return 'Eggs'
+            elif any(word in name for word in ['frozen', 'pizza', 'waffle']) and not any(w in name for w in ['bread', 'pie']): return 'Frozen'
+            elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']): return 'Seafood'
+            elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger']): return 'Fresh Meat'
+            elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']): return 'Deli'
+            elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']) and not any(w in name for w in ['oreo', 'cookie', 'frozen']): return 'Bakery'
+            elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']): return 'Produce'
+            elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']): return 'Beverages'
+            elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']): return 'Home'
+            else: return 'Grocery'
+
+        # Apply logic to a dedicated column
+        df_taylor['Taylor_Category'] = df_taylor.apply(assign_taylors_categories, axis=1)
+
+        # --- 2. TOP CATEGORIES & AUDIT TABLE ---
+        st.write("---")
+        st.subheader("📊 Top Categories by Shopper Engagement")
+        
+        col_cat_graph, col_cat_table = st.columns([7, 3])
+        
+        with col_cat_graph:
+            cat_engagement = df_taylor.groupby('Taylor_Category').agg(Clicks=('Clicks', 'sum')).reset_index().sort_values(by='Clicks', ascending=False)
+            fig_cat = px.bar(cat_engagement, x='Taylor_Category', y='Clicks', text='Clicks', color_discrete_sequence=['#0054B7'])
+            fig_cat.update_layout(title=dict(text="Category Engagement (Total Clicks)", x=0.5, font=dict(family='Arial', size=16)), xaxis_title=None, yaxis_title="Total Clicks")
+            st.plotly_chart(fig_cat, use_container_width=True)
+
+            # 1. PET
+            if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat']):
+                return 'Pet'
+                
+            # 2. ALCOHOL (Wine, beer, spirits)
+            elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']):
+                return 'Alcohol'
+                
+            # 3. BACON
+            elif 'bacon' in name:
+                return 'Bacon'
+                
+            # 4. BUTTER
+            elif any(word in name for word in ['butter', 'margarine', 'ghee']):
+                if 'peanut' not in name and 'almond' not in name:
+                    return 'Butter'
+                    
+            # 5. ICE CREAM
+            elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']):
+                return 'Ice Cream'
+                
+            # 6. DAIRY
+            elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']):
+                return 'Dairy'
+                
+            # 7. CHEESE
+            elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']):
+                return 'Cheese'
+                
+            # 8. EGGS
+            elif 'egg' in name:
+                if 'chocolate' not in name and 'easter' not in name and 'cadbury' not in name:
+                    return 'Eggs'
+                    
+            # 9. FROZEN
+            elif any(word in name for word in ['frozen', 'pizza', 'waffle']):
+                if 'bread' not in name and 'pie' not in name:
+                    return 'Frozen'
+                    
+            # 10. SEAFOOD
+            elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']):
+                return 'Seafood'
+                
+            # 11. FRESH MEAT
+            elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger']):
+                return 'Fresh Meat'
+                
+            # 12. DELI
+            elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']):
+                return 'Deli'
+                
+            # 13. BAKERY
+            elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']):
+                if 'oreo' not in name and 'cookie' not in name and 'frozen' not in name:
+                    return 'Bakery'
+                    
+            # 14. PRODUCE
+            elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']):
+                return 'Produce'
+                
+            # 15. BEVERAGES
+            elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']):
+                return 'Beverages'
+                
+            # 16. HOME
+            elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']):
+                return 'Home'
+                
+            # 17. GROCERY
+            else:
+                return 'Grocery'
+        with col_cat_table:
+            st.markdown("**🔍 Category Mapping Audit**")
+            st.info("Cross-reference products against their newly assigned engine categories.")
+            audit_df = df_taylor[['Name', 'Taylor_Category']].drop_duplicates().sort_values(by='Name').reset_index(drop=True)
+            st.dataframe(audit_df, use_container_width=True, hide_index=True, height=400)
+
+        # --- 3. TRUE GLOBAL AVERAGES CALCULATION ---
+        global_avg_clicks = df_taylor['Clicks'].mean()
+        
+        total_campaign_views = df_taylor['Views'].sum()
+        total_campaign_clicks = df_taylor['Clicks'].sum()
+        global_avg_ctr = (total_campaign_clicks / total_campaign_views) * 100 if total_campaign_views > 0 else 0.0
+
+        # Apply it immediately before the graphs are drawn
+        df_prod['L1_Category'] = df_prod.apply(assign_taylors_categories, axis=1)
+        # -------------------------------------------
+        # Calculate individual item CTR safely
+        df_taylor['CTR'] = np.where(df_taylor['Views'] > 0, (df_taylor['Clicks'] / df_taylor['Views']) * 100, 0)
+
+        # ---> THE REST OF TAYLOR'S GRAPHS AND TABLES CONTINUE DOWN HERE <---
+        # --- 4. TOP 10 ITEMS GRAPHS ---
+        st.write("---")
+        st.subheader("🏆 Top 10 Items")
+        
+        col_t1, col_t2 = st.columns(2)
+        
+        with col_t1:
+            st.markdown("**Shopper Interest by Clicks**")
+            top_10_clicks = df_taylor.nlargest(10, 'Clicks')[['Name', 'Clicks', 'Taylor_Category']].copy()
+            avg_click_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'Clicks': global_avg_clicks, 'Taylor_Category': 'N/A'}])
+            top_10_clicks_with_avg = pd.concat([top_10_clicks, avg_click_row], ignore_index=True)
+            
+            fig_top_clicks = px.bar(top_10_clicks_with_avg, x='Clicks', y='Name', orientation='h', color='Taylor_Category')
+            fig_top_clicks.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Total Clicks", yaxis_title=None, legend=dict(title="Assigned Category"))
+            st.plotly_chart(fig_top_clicks, use_container_width=True)
+
+        with col_t2:
+            st.markdown("**Shopper Interest by Item CTR**")
+            top_10_ctr = df_taylor.nlargest(10, 'CTR')[['Name', 'CTR', 'Taylor_Category']].copy()
+            avg_ctr_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'CTR': global_avg_ctr, 'Taylor_Category': 'N/A'}])
+            top_10_ctr_with_avg = pd.concat([top_10_ctr, avg_ctr_row], ignore_index=True)
+            
+            fig_top_ctr = px.bar(top_10_ctr_with_avg, x='CTR', y='Name', orientation='h', color='Taylor_Category')
+            fig_top_ctr.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Click-Through Rate (%)", yaxis_title=None, legend=dict(title="Assigned Category"))
+            st.plotly_chart(fig_top_ctr, use_container_width=True)
+
+def render_taylors_workspace():
+    st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
+
+    dl_placeholder = st.empty()  # 🚨 THE NEW DOWNLOAD BUTTON PLACEHOLDER
+
+    col1, col2 = st.columns(2)
+    with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
+    with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
+
+    # Path to the hidden USPS reference file (Supports CSV or XLSX)
+    usps_path_xlsx = "reference_data/usps_reference.xlsx"
+    usps_path_csv = "reference_data/usps_reference.csv"
+
+    usps_path = None
+    if os.path.exists(usps_path_csv):
+        usps_path = usps_path_csv
+    elif os.path.exists(usps_path_xlsx):
+        usps_path = usps_path_xlsx
+
+    if not usps_path:
+        st.error("⚠️ **System Missing File:** Please ask your admin to place the `usps_reference.xlsx` (or `.csv`) file inside the `reference_data/` folder on the server.")
         return
 
-    # --- 1. ISOLATE DATA & APPLY CATEGORIZATION ENGINE ---
-    df_taylor = df_prod.copy()
-    
-    def assign_taylors_categories(row):
-        name = str(row['Name']).lower()
-        
-        # 1. PET (Added 'churu')
-        if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat', 'churu']): 
-            return 'Pet'
-        elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']): 
-            return 'Alcohol'
-        elif 'bacon' in name: 
-            return 'Bacon'
-        elif any(word in name for word in ['butter', 'margarine', 'ghee']) and not any(w in name for w in ['peanut', 'almond']): 
-            return 'Butter'
-        elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']): 
-            return 'Ice Cream'
-        elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']): 
-            return 'Dairy'
-        elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']): 
-            return 'Cheese'
-        elif 'egg' in name and not any(w in name for w in ['chocolate', 'easter', 'cadbury']): 
-            return 'Eggs'
-        elif any(word in name for word in ['frozen', 'pizza', 'waffle']) and not any(w in name for w in ['bread', 'pie']): 
-            return 'Frozen'
-        # 10. SEAFOOD
-        elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']): 
-            return 'Seafood'
-        # 11. FRESH MEAT (Added 'crooked willow')
-        elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger', 'crooked willow']): 
-            return 'Fresh Meat'
-        elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']): 
-            return 'Deli'
-        elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']) and not any(w in name for w in ['oreo', 'cookie', 'frozen']): 
-            return 'Bakery'
-        elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']): 
-            return 'Produce'
-        elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']): 
-            return 'Beverages'
-        elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']): 
-            return 'Home'
-        else: 
+    if not (merch_file and fsa_files and len(fsa_files) > 0):
+        st.info("⚠️ **Awaiting Data:** Please upload your Merch file and at least one FSA file to run the pipeline.")
+        return
+
+    with st.spinner("Executing the automated pipeline natively..."):
+        # 1. Load the RAW Merch Data first
+        df_clean, m, _ = scrub_and_load_excel(merch_file)
+        if df_clean is None: return
+
+        if m.get('sku') and m['sku'] in df_clean.columns:
+            raw_sku_col = m['sku']
+            sku_series = df_clean[raw_sku_col].astype(str).str.strip().str.lower()
+            blank_mask = df_clean[raw_sku_col].isna() | sku_series.isin(['nan', 'none', 'null', 'unknown', '0', '0.0', ''])
+            df_clean = df_clean[blank_mask].copy()
+
+            if df_clean.empty:
+                st.error("⚠️ No products found with a blank SKU. Taylor's Workspace is configured to evaluate Non-SKU items.")
+                return
+
+        df_prod, _, _ = process_metrics(df_clean, m)
+        valid_display_types = ['ITEM', 'PRODUCT']
+        df_prod = df_prod[df_prod['Display_Type'].astype(str).str.upper().isin(valid_display_types)].copy()
+
+        if df_prod.empty:
+            st.error("⚠️ The engine processed the file but found zero Blank-SKU rows categorized as 'ITEM' or 'PRODUCT'.")
+            return
+
+        # 2. Load Generic Files (FSA and USPS)
+        def load_generic(f):
+            file_bytes = f.read()
+            if f.name.lower().endswith('.csv'): 
+                df = pd.read_csv(io.BytesIO(file_bytes), low_memory=False)
+            else:
+                df = pd.read_excel(io.BytesIO(file_bytes))
+            df.columns = [str(c).strip() for c in df.columns]
+            return df.loc[:, ~df.columns.duplicated()]
+
+        df_fsa = pd.concat([load_generic(f) for f in fsa_files], ignore_index=True)
+        df_fsa = df_fsa.loc[:, ~df_fsa.columns.duplicated()]
+
+        if usps_path.endswith('.csv'):
+            df_usps = pd.read_csv(usps_path, dtype=str, low_memory=False) 
+        else:
+            df_usps = pd.read_excel(usps_path, dtype=str)
+
+        df_usps.columns = [str(c).strip() for c in df_usps.columns]
+        df_usps = df_usps.loc[:, ~df_usps.columns.duplicated()]
+
+        # 3. SMARTER Column Identification Helper
+        def get_col_fuzzy_strict(df, keywords, exclude_cols=None):
+            exclude_cols = exclude_cols or []
+            # Exact Match First
+            for k in keywords:
+                for col in df.columns:
+                    if col not in exclude_cols and str(col).strip().lower() == k: return col
+            # Contains Match Second
+            for k in keywords:
+                for col in df.columns:
+                    if col not in exclude_cols and k in str(col).lower(): return col
+            return "UNKNOWN"
+
+        # Explicitly target 'pricing zone name' before anything else
+        fsa_desc_col = get_col_fuzzy_strict(df_fsa, ['pricing zone name', 'description', 'flyer', 'campaign', 'name', 'zone'])
+        if fsa_desc_col == "UNKNOWN":
+            fsa_desc_col = df_fsa.columns[0] # Fallback to first column if totally lost
+
+        # Find and exclude the ID column so we don't accidentally grab it later
+        exclude_cols = [fsa_desc_col]
+        id_col = get_col_fuzzy_strict(df_fsa, ['pricing zone id', 'id'])
+        if id_col != "UNKNOWN": exclude_cols.append(id_col)
+
+        fsa_zip_col = get_col_fuzzy_strict(df_fsa, ['fsa', 'zip', 'postal'], exclude_cols=exclude_cols)
+        if fsa_zip_col == "UNKNOWN":
+            fsa_zip_col = [c for c in df_fsa.columns if c not in exclude_cols][0]
+
+        usps_zip_col = get_col_fuzzy_strict(df_usps, ['fsa', 'zip', 'postal'])
+        if usps_zip_col == "UNKNOWN": usps_zip_col = df_usps.columns[0]
+
+        usps_state_col = get_col_fuzzy_strict(df_usps, ['state', 'province', 'st', 'region', 'terr'], exclude_cols=[usps_zip_col])
+        if usps_state_col == "UNKNOWN": usps_state_col = [c for c in df_usps.columns if c != usps_zip_col][0]
+
+        # --- ARMORED KEY CLEANING & ZIP CODE PADDING ---
+        def safe_pad_zip(z):
+            z = str(z).strip().upper().replace(' ', '').replace('.0', '')
+            if z == 'NAN' or z == 'NONE': return 'UNKNOWN'
+            if z.isdigit() and len(z) < 5:
+                return z.zfill(5)
+            return z
+
+        df_fsa[fsa_zip_col] = df_fsa[fsa_zip_col].apply(safe_pad_zip)
+        df_usps[usps_zip_col] = df_usps[usps_zip_col].apply(safe_pad_zip)
+
+        def aggressive_key_clean(s):
+            cleaned = re.sub(r'[^A-Z0-9]', '', str(s).upper())
+            # Strip the word "ZONE" if it exists, so "ZONE3" perfectly matches "3"
+            if cleaned.startswith("ZONE") and len(cleaned) > 4:
+                cleaned = cleaned.replace("ZONE", "")
+            return cleaned
+
+        df_prod['Flyer_Join_Key'] = df_prod['Flyer_Description'].apply(aggressive_key_clean)
+        df_fsa['FSA_Join_Key'] = df_fsa[fsa_desc_col].apply(aggressive_key_clean)
+
+        df_usps_unique = df_usps[[usps_zip_col, usps_state_col]].drop_duplicates(subset=[usps_zip_col])
+        campaign_zips = df_fsa.merge(df_usps_unique, left_on=fsa_zip_col, right_on=usps_zip_col, how='inner')
+        campaign_states = campaign_zips[['FSA_Join_Key', usps_state_col]].drop_duplicates()
+
+        def assign_custom_region(state_code):
+            st_clean = str(state_code).strip().upper()
+
+            # East Region (+ DC, WV, IN, NC)
+            if st_clean in ['DE', 'MD', 'NJ', 'OH', 'PA', 'VA', 'DC', 'WV', 'IN', 'NC', 
+                            'DELAWARE', 'MARYLAND', 'NEW JERSEY', 'OHIO', 'PENNSYLVANIA', 'VIRGINIA', 'DISTRICT OF COLUMBIA', 'WEST VIRGINIA', 'INDIANA', 'NORTH CAROLINA']: 
+                return 'East'
+
+            # West Region (+ AZ)
+            if st_clean in ['CA', 'AZ', 'CALIFORNIA', 'ARIZONA']: 
+                return 'West'
+
+            # Northwest Region (+ MT)
+            if st_clean in ['ID', 'OR', 'WA', 'MT', 'IDAHO', 'OREGON', 'WASHINGTON', 'MONTANA']: 
+                return 'Northwest'
+
+            # Nevada Region
+            if st_clean in ['LV', 'NV', 'NEVADA', 'LAS VEGAS']: 
+                return 'Nevada'
+
+            # Any total outliers will be grouped cleanly here instead of showing as isolated states
+            return 'Other'
+
+        campaign_states['Region'] = campaign_states[usps_state_col].apply(assign_custom_region)
+
+        # 🚨 Fix: Keep only the primary region for zones that physically cross state borders to prevent metric duplication
+        campaign_region_map = campaign_states[['FSA_Join_Key', 'Region']].drop_duplicates(subset=['FSA_Join_Key'], keep='first')
+
+        df_prod = df_prod.merge(campaign_region_map, left_on='Flyer_Join_Key', right_on='FSA_Join_Key', how='left')
+
+        # 🚨 Fix: Upgraded Smarter Matching Logic for missed connections
+        unmatched_mask = df_prod['Region'].isna()
+        if unmatched_mask.any():
+            fallback_list = campaign_region_map.dropna(subset=['FSA_Join_Key', 'Region']).values.tolist()
+            def smarter_match(m_key):
+                m_str = str(m_key).strip().lower()
+                if not m_str or m_str in ['nan', 'none']: return 'Other'
+
+                # 1. Exact Mathematical Number Matching
+                m_nums = set([str(int(n)) for n in re.findall(r'\d+', m_str)])
+                for f_key, reg in fallback_list:
+                    f_nums = set([str(int(n)) for n in re.findall(r'\d+', str(f_key))])
+                    if f_nums and f_nums.issubset(m_nums):
+                        return reg
+
+                # 2. Exact Word Boundary Matching (for text keys)
+                m_words = set(re.findall(r'\b\w+\b', m_str))
+                for f_key, reg in fallback_list:
+                    f_words = set(re.findall(r'\b\w+\b', str(f_key).lower()))
+                    if f_words and f_words.issubset(m_words):
+                        return reg
+
+                # 3. Final Fallback (only for long strings to prevent small number collision)
+                for f_key, reg in fallback_list:
+                    f_clean = str(f_key).strip().lower()
+                    if len(f_clean) >= 4 and f_clean in m_str:
+                        return reg
+
+                return 'Other'
+
+            # Use original flyer description with spaces intact for accurate word/number extraction
+            df_prod.loc[unmatched_mask, 'Region'] = df_prod.loc[unmatched_mask, 'Flyer_Description'].apply(smarter_match)
+
+        df_prod['Region'] = df_prod['Region'].fillna('Other')
+
+        def taylor_name_scrubber(text):
+            text = str(text).lower()
+            text = re.sub(r'\(.*?\)', '', text)
+            text = re.sub(r'\[.*?\]', '', text)
+            text = re.sub(r'\b\d+(\.\d+)?\s*(g|kg|ml|l|oz|lb|pk|pack|ea|ct)\b', '', text)
+            text = re.sub(r'[^a-z0-9\s]', ' ', text)
+            return re.sub(r'\s+', ' ', text).strip().title()
+
+        df_prod['Clean_Name'] = df_prod['Name'].apply(taylor_name_scrubber)
+
+        def get_taylor_cat(name, l1, l2):
+            text = f"{name} {l1} {l2}".lower()
+            if any(w in text for w in ['wine', 'beer', 'spirit', 'liquor', 'vodka', 'whiskey', 'tequila', 'ipa', 'alcohol']): return 'Alcohol'
+            if 'bacon' in text: return 'Bacon'
+            if any(w in text for w in ['ice cream', 'gelato', 'sorbet', 'popsicle']): return 'Ice Cream'
+            if any(w in text for w in ['butter', 'margarine']): return 'Butter'
+            if any(w in text for w in ['cheese', 'cheddar', 'mozzarella', 'provolone', 'gouda', 'brie', 'feta', 'parmesan']): return 'Cheese'
+            if any(w in text for w in ['milk', 'yogurt', 'sour cream', 'cream cheese', 'cottage cheese', 'dairy']): return 'Dairy'
+            if 'egg' in text and 'leg' not in text: return 'Eggs'
+            if any(w in text for w in ['dog', 'cat', 'pet', 'kibble', 'treat']): return 'Pet'
+            if any(w in text for w in ['frozen', 'pizza (frozen)']): return 'Frozen'
+            if any(w in text for w in ['bakery', 'bread', 'muffin', 'bagel', 'croissant', 'fresh baked', 'bun', 'roll', 'tart', 'pastry']): return 'Bakery'
+            if any(w in text for w in ['fish', 'salmon', 'shrimp', 'crab', 'seafood', 'tuna', 'lobster', 'cod', 'tilapia']): return 'Seafood'
+            if any(w in text for w in ['deli', 'cold cut', 'salami', 'prosciutto', 'sliced ham', 'sliced turkey']): return 'Deli'
+            if any(w in text for w in ['beef', 'chicken', 'pork', 'steak', 'ground beef', 'poultry', 'meat', 'roast', 'breast', 'thigh']): return 'Fresh Meat'
+            if any(w in text for w in ['produce', 'fresh fruit', 'fresh veg', 'apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'berry', 'grapes']): return 'Produce'
+            if any(w in text for w in ['water', 'soda', 'pop', 'juice', 'coke', 'pepsi', 'coffee', 'tea', 'beverage', 'drink']): return 'Beverages'
+            if any(w in text for w in ['detergent', 'cleaner', 'paper towel', 'toilet', 'soap', 'trash bag', 'home']): return 'Home'
             return 'Grocery'
 
-    # Apply logic to a dedicated column
-    df_taylor['Taylor_Category'] = df_taylor.apply(assign_taylors_categories, axis=1)
+        df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
 
-    # --- 2. TOP CATEGORIES & AUDIT TABLE ---
+    # 🚨 DIAGNOSTIC DASHBOARD INJECTION 🚨
+    with st.expander("🛠️ PIPELINE DIAGNOSTICS (Click to expand)"):
+        st.markdown("**1. What Columns Did the Engine Grab?**")
+        st.write(f"- Merch Flyer Column: `{m['run_name']}`")
+        st.write(f"- FSA Flyer Column: `{fsa_desc_col}`")
+        st.write(f"- FSA ZIP Column: `{fsa_zip_col}`")
+        st.write(f"- USPS ZIP Column: `{usps_zip_col}`")
+        st.write(f"- USPS State Column: `{usps_state_col}`")
+
+        st.markdown("**2. ZIP Code Handshake Test**")
+        st.write(f"Total Matches found between FSA file and USPS File: **{len(campaign_zips)}**")
+        if len(campaign_zips) == 0:
+            st.error("🚨 FAILURE: The ZIP codes in the FSA file do not match anything in the USPS file.")
+            st.write("First 5 FSA ZIPs:", df_fsa[fsa_zip_col].head(5).tolist())
+            st.write("First 5 USPS ZIPs:", df_usps[usps_zip_col].head(5).tolist())
+
+        st.markdown("**3. Flyer Name Handshake Test**")
+        st.write("First 5 Flyer Names in Merch File:", df_prod['Flyer_Join_Key'].head(5).tolist())
+        st.write("First 5 Flyer Names in FSA File:", df_fsa['FSA_Join_Key'].head(5).tolist())
+
+    st.success("✅ **Data Merged Successfully!** Blank SKUs filtered to actual ITEMS, Product names unified, and regions matched.")
+
+    # --------------------------------------------------------------------------
+    # DATA AGGREGATIONS
+    # --------------------------------------------------------------------------
+    cat_agg = df_prod.groupby('cat_m').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    cat_agg['Category CTR'] = np.where(cat_agg['Views'] > 0, cat_agg['Clicks'] / cat_agg['Views'], 0)
+
+    # 🚨 UPDATED: Grouping now pulls in the average Current Price for the item
+    top_items = df_prod.groupby('Clean_Name').agg({
+        'cat_m': 'first', 
+        'Curr_Price': 'mean', 
+        'Views': 'sum', 
+        'Clicks': 'sum'
+    }).reset_index()
+    top_items.rename(columns={'Clean_Name': 'Product Name', 'cat_m': 'Category', 'Curr_Price': 'Price'}, inplace=True)
+    top_items['Item CTR'] = np.where(top_items['Views'] > 0, top_items['Clicks'] / top_items['Views'], 0)
+
+    reg_cat_agg = df_prod.groupby(['cat_m', 'Region']).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+    reg_cat_agg['CTR'] = np.where(reg_cat_agg['Views'] > 0, reg_cat_agg['Clicks'] / reg_cat_agg['Views'], 0)
+
+    # 🚨 REGIONAL EXCEL EXPORT GENERATOR 🚨
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        if not cat_agg.empty:
+            cat_agg.sort_values(by='Category CTR', ascending=False).to_excel(writer, sheet_name='Top Categories', index=False)
+
+        if not top_items.empty:
+            top_items.sort_values(by='Item CTR', ascending=False).to_excel(writer, sheet_name='Top Items by CTR', index=False)
+            top_items.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Top Items by Clicks', index=False)
+
+        if not reg_cat_agg.empty:
+            pivot_reg_export = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0).reset_index()
+            pivot_reg_export.to_excel(writer, sheet_name='Category CTR by Region', index=False)
+
+        # Build a master list of all regional item performance
+        reg_items_full = df_prod.groupby(['Region', 'Clean_Name']).agg({'cat_m': 'first', 'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+        reg_items_full.rename(columns={'Clean_Name': 'Product Name', 'cat_m': 'Category'}, inplace=True)
+        reg_items_full['Item CTR'] = np.where(reg_items_full['Views'] > 0, reg_items_full['Clicks'] / reg_items_full['Views'], 0)
+        reg_items_full = reg_items_full.sort_values(by=['Region', 'Item CTR'], ascending=[True, False])
+        reg_items_full.to_excel(writer, sheet_name='All Items by Region', index=False)
+
+    output.seek(0)
+    dl_placeholder.download_button(
+        label="⬇️ Download Regional Dashboard Report (.xlsx)",
+        data=output,
+        file_name="Regional_Campaign_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+   # --------------------------------------------------------------------------
+    # DASHBOARD RENDERING
+    # --------------------------------------------------------------------------
+
+    # 🚨 UPDATED CAMPAIGN METADATA RECAP 🚨
+    merchant = "Grocery Outlet"
+
+    macro_run_col = next((c for c in df_clean.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower()), None)
+    runs_display = ", ".join([str(x) for x in df_clean[macro_run_col].dropna().unique()]) if macro_run_col else "Unknown Campaign"
+
+    date_from_col = next((c for c in df_clean.columns if 'available from' in str(c).lower() or 'start date' in str(c).lower()), None)
+    date_to_col = next((c for c in df_clean.columns if 'available to' in str(c).lower() or 'end date' in str(c).lower()), None)
+
+    date_from = pd.to_datetime(df_clean[date_from_col], errors='coerce').min().strftime('%b %d, %Y') if date_from_col else "N/A"
+    date_to = pd.to_datetime(df_clean[date_to_col], errors='coerce').max().strftime('%b %d, %Y') if date_to_col else "N/A"
+
+    st.info(f"📍 **REGIONAL FLIGHT RECAP:** {merchant}  |  **Flyer Run Name(s):** {runs_display}  |  **Window:** {date_from} to {date_to}")
+
     st.write("---")
+
+    # 📊 Top Categories Chart
     st.subheader("📊 Top Categories by Shopper Engagement")
-    
-    col_cat_graph, col_cat_table = st.columns([7, 3])
-    
-    with col_cat_graph:
-        cat_engagement = df_taylor.groupby('Taylor_Category').agg(Clicks=('Clicks', 'sum')).reset_index().sort_values(by='Clicks', ascending=False)
-        fig_cat = px.bar(cat_engagement, x='Taylor_Category', y='Clicks', text='Clicks', color_discrete_sequence=['#0054B7'])
-        fig_cat.update_layout(title=dict(text="Category Engagement (Total Clicks)", x=0.5, font=dict(family='Arial', size=16)), xaxis_title=None, yaxis_title="Total Clicks")
-        st.plotly_chart(fig_cat, use_container_width=True)
-        
-    with col_cat_table:
-        st.markdown("**🔍 Category Mapping Audit**")
-        st.info("Cross-reference products against their newly assigned engine categories.")
-        audit_df = df_taylor[['Name', 'Taylor_Category']].drop_duplicates().sort_values(by='Name').reset_index(drop=True)
-        st.dataframe(audit_df, use_container_width=True, hide_index=True, height=400)
 
-    # --- 3. TRUE GLOBAL AVERAGES CALCULATION ---
-    global_avg_clicks = df_taylor['Clicks'].mean()
-    
-    total_campaign_views = df_taylor['Views'].sum()
-    total_campaign_clicks = df_taylor['Clicks'].sum()
-    global_avg_ctr = (total_campaign_clicks / total_campaign_views) * 100 if total_campaign_views > 0 else 0.0
+    # Calculate the max CTR and add 0.50% (0.005) headroom so the top tick mark always shows
+    max_cat_ctr = cat_agg['Category CTR'].max() if not cat_agg.empty else 0
 
-    df_taylor['CTR'] = np.where(df_taylor['Views'] > 0, (df_taylor['Clicks'] / df_taylor['Views']) * 100, 0)
+    fig_cat = px.bar(cat_agg.sort_values(by='Category CTR', ascending=False).head(15), x='cat_m', y='Category CTR', color_discrete_sequence=['#43c4f4'])
+    fig_cat.update_layout(
+        # 'Arial'
+        title=dict(text='Top Categories by Shopper Engagement', x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)),
+        yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_cat_ctr + 0.005]), 
+        xaxis=dict(title=None)
+    )
+    st.plotly_chart(fig_cat, use_container_width=True)
 
-    # --- 4. TOP 10 ITEMS GRAPHS ---
     st.write("---")
-    st.subheader("🏆 Top 10 Items")
-    
-    col_t1, col_t2 = st.columns(2)
-    
-    with col_t1:
-        st.markdown("**Shopper Interest by Clicks**")
-        top_10_clicks = df_taylor.nlargest(10, 'Clicks')[['Name', 'Clicks', 'Taylor_Category']].copy()
-        avg_click_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'Clicks': global_avg_clicks, 'Taylor_Category': 'N/A'}])
-        top_10_clicks_with_avg = pd.concat([top_10_clicks, avg_click_row], ignore_index=True)
-        
-        fig_top_clicks = px.bar(top_10_clicks_with_avg, x='Clicks', y='Name', orientation='h', color='Taylor_Category')
-        fig_top_clicks.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Total Clicks", yaxis_title=None, legend=dict(title="Assigned Category"))
-        st.plotly_chart(fig_top_clicks, use_container_width=True)
 
-    with col_t2:
-        st.markdown("**Shopper Interest by Item CTR**")
-        top_10_ctr = df_taylor.nlargest(10, 'CTR')[['Name', 'CTR', 'Taylor_Category']].copy()
-        avg_ctr_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'CTR': global_avg_ctr, 'Taylor_Category': 'N/A'}])
-        top_10_ctr_with_avg = pd.concat([top_10_ctr, avg_ctr_row], ignore_index=True)
-        
-        fig_top_ctr = px.bar(top_10_ctr_with_avg, x='CTR', y='Name', orientation='h', color='Taylor_Category')
-        fig_top_ctr.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Click-Through Rate (%)", yaxis_title=None, legend=dict(title="Assigned Category"))
-        st.plotly_chart(fig_top_ctr, use_container_width=True)
+    # 🏆 Top 10 by CTR
+    st.subheader("🏆 Top 10 Items - Shopper Interest by Item CTR")
+    top_10_ctr = top_items.sort_values(by='Item CTR', ascending=False).head(10)
+    avg_ctr_10 = top_10_ctr['Item CTR'].mean() if not top_10_ctr.empty else 0
+    st.metric(label="Avg. Item CTR (Top 10)", value=f"{avg_ctr_10:.2%}")
+    st.dataframe(top_10_ctr[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+    st.write("---")
+
+    # 🏆 Top 10 by Clicks
+    st.subheader("🏆 Top 10 Items - Shopper Interest by Clicks")
+    top_10_clicks = top_items.sort_values(by='Clicks', ascending=False).head(10)
+    avg_clicks_10 = top_10_clicks['Clicks'].mean() if not top_10_clicks.empty else 0
+    st.metric(label="Avg. Item Clicks (Top 10)", value=f"{avg_clicks_10:,.0f}")
+    st.dataframe(top_10_clicks[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+    st.write("---")
+
+    # 🗺️ Category Engagement by Region (Table & Chart Side-by-Side)
+    st.subheader("🗺️ Category Engagement by Region")
+    if not reg_cat_agg.empty:
+        col_tbl, col_chart = st.columns(2)
+
+        pivot_reg = reg_cat_agg.pivot(index='cat_m', columns='Region', values='CTR').fillna(0)
+
+        with col_tbl:
+            st.markdown("<br>", unsafe_allow_html=True)  # Spacing alignment
+            st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+
+        with col_chart:
+            # Calculate the max CTR and add headroom for this chart too
+            max_reg_ctr = reg_cat_agg['CTR'].max()
+
+            color_map = {'East': '#00b050', 'West': '#073763', 'Nevada': '#43c4f4', 'Northwest': '#ffaf15', 'Other': '#94a3b8'}
+            fig_reg = px.bar(reg_cat_agg, x='cat_m', y='CTR', color='Region', barmode='group', color_discrete_map=color_map)
+            fig_reg.update_layout(
+                # TYPE YOUR PREFERRED FONT NAME HERE
+                title=dict(text='Category Engagement by Region', x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)),
+                yaxis=dict(title="Item CTR", tickformat='.2%', dtick=0.005, range=[0, max_reg_ctr + 0.005]),
+                xaxis=dict(title=None)
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
+    else:
+        st.info("No regional category trends found.")
+
+    st.write("---")
+    st.subheader("📍 Top 5 Items by Region & Item CTR")
+    unique_regions = [r for r in df_prod['Region'].unique() if pd.notna(r) and r != 'Other']
+
+    if unique_regions:
+        tab_reg = st.tabs(list(unique_regions))
+        for i, r in enumerate(unique_regions):
+            with tab_reg[i]:
+                reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
+                reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
+                reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
+                st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    else:
+        st.info("No localized regional items captured.") 
         
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

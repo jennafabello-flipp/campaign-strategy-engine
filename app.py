@@ -569,6 +569,15 @@ def render_single_campaign_matrix():
                 legend=dict(title=None)
             )
             st.plotly_chart(fig_price_2, use_container_width=True)
+
+        # --- STRATEGIC INSIGHT CALLOUT ---
+        st.info("""
+        💡 **How to Read the Share Graphs:** These charts display the **Proportional Share of Total**, not raw volume. 
+        
+        * **Balanced Bars (Equal Height):** If the orange (Clicks) and blue (Clips) bars are roughly the same height, shopper behavior is highly predictable and stable. The price band is converting traffic into list-adds at a perfectly proportionate rate.
+        * **Orange Higher than Blue (Clickbait):** The price tier generates high curiosity and traffic, but shoppers ultimately refuse to save the items (often due to price shock).
+        * **Blue Higher than Orange (High Efficiency):** This price tier is highly efficient. Even if it doesn't drive the majority of your traffic, the shoppers who *do* click are highly motivated to save or buy the products.
+        """)
         
         if not p_agg_sorted.empty and global_totals['views'] > 0:
             top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None

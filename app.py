@@ -480,7 +480,7 @@ def render_single_campaign_matrix():
             with col_c1: 
                 fig_l1 = px.bar(l1_sorted.melt(id_vars='L1_Category', value_vars=['Item Allocation', 'Item Click']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                 fig_l1.add_scatter(x=l1_sorted['L1_Category'], y=l1_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l1.update_layout(title=dict(text="L1 Category Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                fig_l1.update_layout(title=dict(text="Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l1, use_container_width=True)
                 
         with tab_l2:
@@ -491,7 +491,7 @@ def render_single_campaign_matrix():
             with col_c2: 
                 fig_l2 = px.bar(l2_sorted.melt(id_vars='L2_Category', value_vars=['Item Allocation', 'Item Click']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                 fig_l2.add_scatter(x=l2_sorted['L2_Category'], y=l2_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l2.update_layout(title=dict(text="L2 Subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                fig_l2.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l2, use_container_width=True)
                 
         with tab_l3:
@@ -502,7 +502,7 @@ def render_single_campaign_matrix():
             with col_c3: 
                 fig_l3 = px.bar(l3_sorted.melt(id_vars='L3_Category', value_vars=['Item Allocation', 'Item Click']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                 fig_l3.add_scatter(x=l3_sorted['L3_Category'], y=l3_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l3.update_layout(title=dict(text="L3 Sub-subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                fig_l3.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l3, use_container_width=True)
         st.write("---")
         st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")

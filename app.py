@@ -909,7 +909,7 @@ def render_head_to_head_variance():
                 xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
- st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True)
 
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)

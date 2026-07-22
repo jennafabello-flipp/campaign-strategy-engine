@@ -468,6 +468,7 @@ def render_single_campaign_matrix():
         
         st.write("---")
         st.write("---")
+       st.write("---")
         st.subheader("📊 Item Allocation vs Click Share")
         tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
         
@@ -475,32 +476,34 @@ def render_single_campaign_matrix():
             col_t1, col_c1 = st.columns(2)
             l1_sorted = cat_l1_agg.sort_values(by='Click Share %', ascending=False)
             with col_t1: 
-                st.dataframe(l1_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(l1_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}', 'Clip Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
             with col_c1: 
                 fig_l1 = px.bar(l1_sorted.melt(id_vars='L1_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l1.update_layout(title=dict(text="Category Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None))
+                fig_l1.add_scatter(x=l1_sorted['L1_Category'], y=l1_sorted['Clip Share %'], mode='lines+markers', name='Clip Share %', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                fig_l1.update_layout(title=dict(text="L1 Category Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l1, use_container_width=True)
                 
         with tab_l2:
             col_t2, col_c2 = st.columns(2)
             l2_sorted = cat_l2_agg.sort_values(by='Click Share %', ascending=False)
             with col_t2: 
-                st.dataframe(l2_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(l2_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}', 'Clip Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
             with col_c2: 
                 fig_l2 = px.bar(l2_sorted.melt(id_vars='L2_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l2.update_layout(title=dict(text="L2 Subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None))
+                fig_l2.add_scatter(x=l2_sorted['L2_Category'], y=l2_sorted['Clip Share %'], mode='lines+markers', name='Clip Share %', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                fig_l2.update_layout(title=dict(text="L2 Subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l2, use_container_width=True)
                 
         with tab_l3:
             col_t3, col_c3 = st.columns(2)
             l3_sorted = cat_l3_agg.sort_values(by='Click Share %', ascending=False)
             with col_t3: 
-                st.dataframe(l3_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(l3_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}', 'Clip Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
             with col_c3: 
                 fig_l3 = px.bar(l3_sorted.melt(id_vars='L3_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l3.update_layout(title=dict(text="L3 Sub-subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None))
+                fig_l3.add_scatter(x=l3_sorted['L3_Category'], y=l3_sorted['Clip Share %'], mode='lines+markers', name='Clip Share %', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                fig_l3.update_layout(title=dict(text="L3 Sub-subcategory Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
                 st.plotly_chart(fig_l3, use_container_width=True)
-
         st.write("---")
         st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
         b_col, c_col = st.columns(2)

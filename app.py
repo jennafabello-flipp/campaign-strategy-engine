@@ -914,6 +914,92 @@ def render_head_to_head_variance():
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================
+# ---> THIS IS YOUR EXISTING HEADER/START OF TAYLOR'S MODULE <---
+        st.header("Taylor's Workspace") 
+        # (or def render_taylors_workspace(): depending on your setup)
+
+        # 🚨 PASTE THE ENGINE EXACTLY HERE 🚨
+        def assign_taylors_categories(row):
+            name = str(row['Name']).lower()
+            
+            # 1. PET
+            if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat']):
+                return 'Pet'
+                
+            # 2. ALCOHOL (Wine, beer, spirits)
+            elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']):
+                return 'Alcohol'
+                
+            # 3. BACON
+            elif 'bacon' in name:
+                return 'Bacon'
+                
+            # 4. BUTTER
+            elif any(word in name for word in ['butter', 'margarine', 'ghee']):
+                if 'peanut' not in name and 'almond' not in name:
+                    return 'Butter'
+                    
+            # 5. ICE CREAM
+            elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']):
+                return 'Ice Cream'
+                
+            # 6. DAIRY
+            elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']):
+                return 'Dairy'
+                
+            # 7. CHEESE
+            elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']):
+                return 'Cheese'
+                
+            # 8. EGGS
+            elif 'egg' in name:
+                if 'chocolate' not in name and 'easter' not in name and 'cadbury' not in name:
+                    return 'Eggs'
+                    
+            # 9. FROZEN
+            elif any(word in name for word in ['frozen', 'pizza', 'waffle']):
+                if 'bread' not in name and 'pie' not in name:
+                    return 'Frozen'
+                    
+            # 10. SEAFOOD
+            elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']):
+                return 'Seafood'
+                
+            # 11. FRESH MEAT
+            elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger']):
+                return 'Fresh Meat'
+                
+            # 12. DELI
+            elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']):
+                return 'Deli'
+                
+            # 13. BAKERY
+            elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']):
+                if 'oreo' not in name and 'cookie' not in name and 'frozen' not in name:
+                    return 'Bakery'
+                    
+            # 14. PRODUCE
+            elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']):
+                return 'Produce'
+                
+            # 15. BEVERAGES
+            elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']):
+                return 'Beverages'
+                
+            # 16. HOME
+            elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']):
+                return 'Home'
+                
+            # 17. GROCERY
+            else:
+                return 'Grocery'
+
+        # Apply it immediately before the graphs are drawn
+        df_prod['L1_Category'] = df_prod.apply(assign_taylors_categories, axis=1)
+        # -------------------------------------------
+
+        # ---> THE REST OF TAYLOR'S GRAPHS AND TABLES CONTINUE DOWN HERE <---
+
 def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)

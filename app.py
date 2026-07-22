@@ -911,113 +911,119 @@ def render_head_to_head_variance():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-# ==========================================
-        # MODULE 4: TAYLOR'S WORKSPACE
-        # ==========================================
-        st.header("🛠️ Taylor's Workspace")
-        
-        # --- 1. ISOLATE DATA & APPLY CATEGORIZATION ENGINE ---
-        df_taylor = df_prod.copy()
-        
-        def assign_taylors_categories(row):
-            name = str(row['Name']).lower()
-            
-            # 1. PET (Added 'churu')
-            if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat', 'churu']): 
-                return 'Pet'
-            elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']): 
-                return 'Alcohol'
-            elif 'bacon' in name: 
-                return 'Bacon'
-            elif any(word in name for word in ['butter', 'margarine', 'ghee']) and not any(w in name for w in ['peanut', 'almond']): 
-                return 'Butter'
-            elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']): 
-                return 'Ice Cream'
-            elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']): 
-                return 'Dairy'
-            elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']): 
-                return 'Cheese'
-            elif 'egg' in name and not any(w in name for w in ['chocolate', 'easter', 'cadbury']): 
-                return 'Eggs'
-            elif any(word in name for word in ['frozen', 'pizza', 'waffle']) and not any(w in name for w in ['bread', 'pie']): 
-                return 'Frozen'
-            # 10. SEAFOOD
-            elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']): 
-                return 'Seafood'
-            # 11. FRESH MEAT (Added 'crooked willow')
-            elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger', 'crooked willow']): 
-                return 'Fresh Meat'
-            elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']): 
-                return 'Deli'
-            elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']) and not any(w in name for w in ['oreo', 'cookie', 'frozen']): 
-                return 'Bakery'
-            elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']): 
-                return 'Produce'
-            elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']): 
-                return 'Beverages'
-            elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']): 
-                return 'Home'
-            else: 
-                return 'Grocery'
+def render_taylors_workspace():
+    # ==========================================
+    # MODULE 4: TAYLOR'S WORKSPACE
+    # ==========================================
+    st.header("🛠️ Taylor's Workspace")
+    
+    # Check if df_prod exists in session state (standard for Streamlit apps)
+    if 'df_prod' in st.session_state:
+        df_prod = st.session_state['df_prod']
+    else:
+        st.error("Data not loaded. Please upload the campaign data first.")
+        return
 
-        # Apply logic to a dedicated column
-        df_taylor['Taylor_Category'] = df_taylor.apply(assign_taylors_categories, axis=1)
-
-        # --- 2. TOP CATEGORIES & AUDIT TABLE ---
-        st.write("---")
-        st.subheader("📊 Top Categories by Shopper Engagement")
+    # --- 1. ISOLATE DATA & APPLY CATEGORIZATION ENGINE ---
+    df_taylor = df_prod.copy()
+    
+    def assign_taylors_categories(row):
+        name = str(row['Name']).lower()
         
-        # This splits the screen: Graph on the left (70%), Table on the right (30%)
-        col_cat_graph, col_cat_table = st.columns([7, 3])
-        
-        with col_cat_graph:
-            cat_engagement = df_taylor.groupby('Taylor_Category').agg(Clicks=('Clicks', 'sum')).reset_index().sort_values(by='Clicks', ascending=False)
-            fig_cat = px.bar(cat_engagement, x='Taylor_Category', y='Clicks', text='Clicks', color_discrete_sequence=['#0054B7'])
-            fig_cat.update_layout(title=dict(text="Category Engagement (Total Clicks)", x=0.5, font=dict(family='Arial', size=16)), xaxis_title=None, yaxis_title="Total Clicks")
-            st.plotly_chart(fig_cat, use_container_width=True)
-            
-        with col_cat_table:
-            st.markdown("**🔍 Category Mapping Audit**")
-            st.info("Cross-reference products against their newly assigned engine categories.")
-            # This generates the exact table you requested!
-            audit_df = df_taylor[['Name', 'Taylor_Category']].drop_duplicates().sort_values(by='Name').reset_index(drop=True)
-            st.dataframe(audit_df, use_container_width=True, hide_index=True, height=400)
+        # 1. PET (Added 'churu')
+        if any(word in name for word in ['cat', 'dog', 'pet', 'litter', 'kibble', 'purina', 'treat', 'churu']): 
+            return 'Pet'
+        elif any(word in name for word in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor']): 
+            return 'Alcohol'
+        elif 'bacon' in name: 
+            return 'Bacon'
+        elif any(word in name for word in ['butter', 'margarine', 'ghee']) and not any(w in name for w in ['peanut', 'almond']): 
+            return 'Butter'
+        elif any(word in name for word in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']): 
+            return 'Ice Cream'
+        elif any(word in name for word in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy']): 
+            return 'Dairy'
+        elif any(word in name for word in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']): 
+            return 'Cheese'
+        elif 'egg' in name and not any(w in name for w in ['chocolate', 'easter', 'cadbury']): 
+            return 'Eggs'
+        elif any(word in name for word in ['frozen', 'pizza', 'waffle']) and not any(w in name for w in ['bread', 'pie']): 
+            return 'Frozen'
+        # 10. SEAFOOD
+        elif any(word in name for word in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster']): 
+            return 'Seafood'
+        # 11. FRESH MEAT (Added 'crooked willow')
+        elif any(word in name for word in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger', 'crooked willow']): 
+            return 'Fresh Meat'
+        elif any(word in name for word in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']): 
+            return 'Deli'
+        elif any(word in name for word in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart']) and not any(w in name for w in ['oreo', 'cookie', 'frozen']): 
+            return 'Bakery'
+        elif any(word in name for word in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli']): 
+            return 'Produce'
+        elif any(word in name for word in ['juice', 'pop', 'soda', 'water', 'coffee', 'tea', 'coke', 'pepsi', 'sprite', 'beverage']): 
+            return 'Beverages'
+        elif any(word in name for word in ['paper towel', 'toilet paper', 'detergent', 'cleaner', 'foil', 'garbage bag', 'soap', 'shampoo', 'toothpaste', 'tissue', 'napkin']): 
+            return 'Home'
+        else: 
+            return 'Grocery'
 
-        # --- 3. TRUE GLOBAL AVERAGES CALCULATION ---
-        global_avg_clicks = df_taylor['Clicks'].mean()
-        
-        total_campaign_views = df_taylor['Views'].sum()
-        total_campaign_clicks = df_taylor['Clicks'].sum()
-        global_avg_ctr = (total_campaign_clicks / total_campaign_views) * 100 if total_campaign_views > 0 else 0.0
+    # Apply logic to a dedicated column
+    df_taylor['Taylor_Category'] = df_taylor.apply(assign_taylors_categories, axis=1)
 
-        df_taylor['CTR'] = np.where(df_taylor['Views'] > 0, (df_taylor['Clicks'] / df_taylor['Views']) * 100, 0)
-
-        # --- 4. TOP 10 ITEMS GRAPHS ---
-        st.write("---")
-        st.subheader("🏆 Top 10 Items")
+    # --- 2. TOP CATEGORIES & AUDIT TABLE ---
+    st.write("---")
+    st.subheader("📊 Top Categories by Shopper Engagement")
+    
+    col_cat_graph, col_cat_table = st.columns([7, 3])
+    
+    with col_cat_graph:
+        cat_engagement = df_taylor.groupby('Taylor_Category').agg(Clicks=('Clicks', 'sum')).reset_index().sort_values(by='Clicks', ascending=False)
+        fig_cat = px.bar(cat_engagement, x='Taylor_Category', y='Clicks', text='Clicks', color_discrete_sequence=['#0054B7'])
+        fig_cat.update_layout(title=dict(text="Category Engagement (Total Clicks)", x=0.5, font=dict(family='Arial', size=16)), xaxis_title=None, yaxis_title="Total Clicks")
+        st.plotly_chart(fig_cat, use_container_width=True)
         
-        col_t1, col_t2 = st.columns(2)
-        
-        with col_t1:
-            st.markdown("**Shopper Interest by Clicks**")
-            top_10_clicks = df_taylor.nlargest(10, 'Clicks')[['Name', 'Clicks', 'Taylor_Category']].copy()
-            avg_click_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'Clicks': global_avg_clicks, 'Taylor_Category': 'N/A'}])
-            top_10_clicks_with_avg = pd.concat([top_10_clicks, avg_click_row], ignore_index=True)
-            
-            fig_top_clicks = px.bar(top_10_clicks_with_avg, x='Clicks', y='Name', orientation='h', color='Taylor_Category')
-            fig_top_clicks.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Total Clicks", yaxis_title=None, legend=dict(title="Assigned Category"))
-            st.plotly_chart(fig_top_clicks, use_container_width=True)
+    with col_cat_table:
+        st.markdown("**🔍 Category Mapping Audit**")
+        st.info("Cross-reference products against their newly assigned engine categories.")
+        audit_df = df_taylor[['Name', 'Taylor_Category']].drop_duplicates().sort_values(by='Name').reset_index(drop=True)
+        st.dataframe(audit_df, use_container_width=True, hide_index=True, height=400)
 
-        with col_t2:
-            st.markdown("**Shopper Interest by Item CTR**")
-            top_10_ctr = df_taylor.nlargest(10, 'CTR')[['Name', 'CTR', 'Taylor_Category']].copy()
-            avg_ctr_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'CTR': global_avg_ctr, 'Taylor_Category': 'N/A'}])
-            top_10_ctr_with_avg = pd.concat([top_10_ctr, avg_ctr_row], ignore_index=True)
-            
-            fig_top_ctr = px.bar(top_10_ctr_with_avg, x='CTR', y='Name', orientation='h', color='Taylor_Category')
-            fig_top_ctr.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Click-Through Rate (%)", yaxis_title=None, legend=dict(title="Assigned Category"))
-            st.plotly_chart(fig_top_ctr, use_container_width=True)
-   
+    # --- 3. TRUE GLOBAL AVERAGES CALCULATION ---
+    global_avg_clicks = df_taylor['Clicks'].mean()
+    
+    total_campaign_views = df_taylor['Views'].sum()
+    total_campaign_clicks = df_taylor['Clicks'].sum()
+    global_avg_ctr = (total_campaign_clicks / total_campaign_views) * 100 if total_campaign_views > 0 else 0.0
+
+    df_taylor['CTR'] = np.where(df_taylor['Views'] > 0, (df_taylor['Clicks'] / df_taylor['Views']) * 100, 0)
+
+    # --- 4. TOP 10 ITEMS GRAPHS ---
+    st.write("---")
+    st.subheader("🏆 Top 10 Items")
+    
+    col_t1, col_t2 = st.columns(2)
+    
+    with col_t1:
+        st.markdown("**Shopper Interest by Clicks**")
+        top_10_clicks = df_taylor.nlargest(10, 'Clicks')[['Name', 'Clicks', 'Taylor_Category']].copy()
+        avg_click_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'Clicks': global_avg_clicks, 'Taylor_Category': 'N/A'}])
+        top_10_clicks_with_avg = pd.concat([top_10_clicks, avg_click_row], ignore_index=True)
+        
+        fig_top_clicks = px.bar(top_10_clicks_with_avg, x='Clicks', y='Name', orientation='h', color='Taylor_Category')
+        fig_top_clicks.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Total Clicks", yaxis_title=None, legend=dict(title="Assigned Category"))
+        st.plotly_chart(fig_top_clicks, use_container_width=True)
+
+    with col_t2:
+        st.markdown("**Shopper Interest by Item CTR**")
+        top_10_ctr = df_taylor.nlargest(10, 'CTR')[['Name', 'CTR', 'Taylor_Category']].copy()
+        avg_ctr_row = pd.DataFrame([{'Name': '📈 CAMPAIGN AVERAGE', 'CTR': global_avg_ctr, 'Taylor_Category': 'N/A'}])
+        top_10_ctr_with_avg = pd.concat([top_10_ctr, avg_ctr_row], ignore_index=True)
+        
+        fig_top_ctr = px.bar(top_10_ctr_with_avg, x='CTR', y='Name', orientation='h', color='Taylor_Category')
+        fig_top_ctr.update_layout(yaxis={'categoryorder':'total ascending'}, xaxis_title="Click-Through Rate (%)", yaxis_title=None, legend=dict(title="Assigned Category"))
+        st.plotly_chart(fig_top_ctr, use_container_width=True)
+        
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS
 # ==============================================================================

@@ -531,17 +531,42 @@ def render_single_campaign_matrix():
             st.markdown("**Discount Band Performance**")
             st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        fig_price = px.bar(
-            p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['List Share %', 'TTM Share %']),
-            x='Price_Tier',
-            y='value',
-            color='variable',
-            barmode='group',
-            color_discrete_sequence=['#16a34a', '#0054B7'],
-            title="Price Band Impact: Add to List % vs. Transfer to Merchant %"
-        )
-        fig_price.update_layout(yaxis=dict(tickformat='.1%'), xaxis_title="Price Tier", yaxis_title="% of Total Share")
-        st.plotly_chart(fig_price, use_container_width=True)
+        # --- NEW SIDE-BY-SIDE PRICE BAND GRAPHS ---
+        col_pb1, col_pb2 = st.columns(2)
+        
+        with col_pb1:
+            # Graph 1: Clicks vs Clips
+            df_melt_1 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['Click Share %', 'List Share %'])
+            df_melt_1['variable'] = df_melt_1['variable'].replace({'Click Share %': 'Clicks to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_1 = px.bar(
+                df_melt_1, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_1.update_layout(
+                title=dict(text="Price Band Analysis", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_1, use_container_width=True)
+
+        with col_pb2:
+            # Graph 2: TTMs vs Clips
+            df_melt_2 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['TTM Share %', 'List Share %'])
+            df_melt_2['variable'] = df_melt_2['variable'].replace({'TTM Share %': 'TTMs to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_2 = px.bar(
+                df_melt_2, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_2.update_layout(
+                title=dict(text="Price Band Analysis", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_2, use_container_width=True)
         
         if not p_agg_sorted.empty and global_totals['views'] > 0:
             top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None

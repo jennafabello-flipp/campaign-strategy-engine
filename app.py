@@ -1104,7 +1104,6 @@ def render_taylors_workspace():
 
         # Safely assign to your existing expected column 'cat_m'
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
-        NEW: EXPLICIT CATEGORY OVERRIDES 
         # This reads your reclassified_products.xlsx file and forces the engine to respect your choices
         override_filepath = "reclassified_products.xlsx"
         if os.path.exists(override_filepath):

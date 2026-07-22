@@ -1104,6 +1104,28 @@ def render_taylors_workspace():
 
         # Safely assign to your existing expected column 'cat_m'
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)
+        🚨 NEW: EXPLICIT CATEGORY OVERRIDES 🚨
+        # This reads your reclassified_products.xlsx file and forces the engine to respect your choices
+        override_filepath = "reclassified_products.xlsx"
+        if os.path.exists(override_filepath):
+            try:
+                df_overrides = pd.read_excel(override_filepath)
+                # Create a master dictionary mapping 'Name' to 'Reassigned Category'
+                override_dict = dict(zip(
+                    df_overrides['Name'].astype(str).str.strip(), 
+                    df_overrides['Reassigned Category'].astype(str).str.strip()
+                ))
+                
+                # Apply the override: If the name is in your file, use your category. Otherwise, keep the engine's guess.
+                def apply_taylors_override(row):
+                    item_name = str(row['Clean_Name']).strip()
+                    if item_name in override_dict and pd.notna(override_dict[item_name]):
+                        return override_dict[item_name]
+                    return row['cat_m']
+                    
+                df_prod['cat_m'] = df_prod.apply(apply_taylors_override, axis=1)
+            except Exception as e:
+                st.warning(f"⚠️ Found the override file, but couldn't read it: {e}")
 
     with st.expander("🛠️ PIPELINE DIAGNOSTICS (Click to expand)"):
         st.markdown("**1. What Columns Did the Engine Grab?**")

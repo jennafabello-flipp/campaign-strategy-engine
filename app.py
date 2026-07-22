@@ -911,6 +911,9 @@ def render_head_to_head_variance():
             )
             st.plotly_chart(fig, use_container_width=True)
 
+def render_taylors_workspace():
+    st.markdown(...) # <--- 4 spaces here!
+    dl_placeholder = st.empty() # <--- 4 spaces here!
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================

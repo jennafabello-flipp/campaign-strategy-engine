@@ -636,7 +636,7 @@ def render_single_campaign_matrix():
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
             st.plotly_chart(fig, use_container_width=True)
-            # --- DYNAMIC STRATEGIC INSIGHT CALLOUT ---
+            # --- DYNAMIC STRATEGIC INSIGHT CALLOUT (WITH DIAGNOSTICS) ---
         if not df_sc_table.empty:
             # 1. Find the exact cliff where readership drops below 50%
             cliff_data = df_sc_table[df_sc_table['% of Users Read'] < 0.50]
@@ -645,18 +645,43 @@ def render_single_campaign_matrix():
                 cliff_depth = cliff_data.iloc[0]['Scroll Depth']
                 cliff_ret = cliff_data.iloc[0]['% of Users Read']
                 cliff_pg = cliff_data.iloc[0]['Approx Page']
-                cliff_text = f"**The 'Half-Life' Cliff:** The data shows audience retention dropping below 50% at the **{cliff_depth}** mark (approx. Page {cliff_pg:.1f}), falling to **{cliff_ret:.1%}**. To guarantee visibility and maximize ROI, your absolute best, highest-margin items must be placed *before* this point."
+                cliff_pg_int = max(1, int(cliff_pg)) # Identify the page right before the drop
+                
+                cliff_text = f"**The 'Half-Life' Cliff:** Audience retention drops below 50% at the **{cliff_depth}** mark (approx. Page {cliff_pg:.1f}), falling to **{cliff_ret:.1%}**. Your highest-margin items must be placed *before* this point to guarantee visibility."
+                
+                # 2. Diagnostic Engine: Why did they leave?
+                page_prod_clicks = df_prod[df_prod['Page'] == cliff_pg_int]['Clicks'].sum() if not df_prod.empty else 0
+                try:
+                    page_creative_clicks = df_creative[df_creative['Page'] == cliff_pg_int]['Clicks'].sum() if not df_creative.empty else 0
+                except NameError:
+                    page_creative_clicks = 0
+                    
+                total_campaign_clicks = df_prod['Clicks'].sum() + page_creative_clicks
+                
+                diagnostic_text = ""
+                if total_campaign_clicks > 0:
+                    creative_share = page_creative_clicks / total_campaign_clicks
+                    prod_share = page_prod_clicks / total_campaign_clicks
+                    
+                    if creative_share > 0.10:
+                        diagnostic_text = f"**Why the Drop? (The Leaky Bucket):** We tracked a massive volume of clicks ({page_creative_clicks:,.0f}) on Marketing Assets/Banners on Page {cliff_pg_int}. Shoppers likely clicked these navigational links and exited the flyer to browse your main site."
+                    elif prod_share > 0.15:
+                        diagnostic_text = f"**Why the Drop? (The Shopping Spree):** Items on Page {cliff_pg_int} captured **{prod_share:.1%}** of your total campaign clicks. Shoppers likely found exactly what they wanted early on and clicked out to purchase."
+                    else:
+                        diagnostic_text = f"**Why the Drop? (Content Friction):** Click engagement on Page {cliff_pg_int} was relatively low compared to the severe drop-off. This suggests the product mix, price points, or layout on this specific page failed to hold attention, causing a pure bounce."
             else:
                 cliff_text = "**The 'Half-Life' Cliff:** Incredible retention! Your audience stays above 50% engagement throughout the entire flyer, giving you massive visibility across every single page."
+                diagnostic_text = ""
 
-            # 2. Find the final "Loyalist" retention at the very end
+            # 3. Find the final "Loyalist" retention at the very end
             final_ret = df_sc_table.iloc[-1]['% of Users Read']
             
             st.info(f"""
             💡 **Dynamic Scroll Insights:** 
             
             * {cliff_text}
-            * **The Loyalists:** You successfully carried **{final_ret:.1%}** of your audience to the very end of the campaign. Because these dedicated shoppers will scroll regardless, the back pages remain an excellent location for niche, high-research, or long-tail product categories.
+            {f'* {diagnostic_text}' if diagnostic_text else ''}
+            * **The Loyalists:** You successfully carried **{final_ret:.1%}** of your audience to the very end of the campaign. The back pages remain an excellent location for niche, high-research, or long-tail product categories.
             """)
 
 # ==============================================================================

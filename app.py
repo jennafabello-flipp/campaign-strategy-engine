@@ -477,7 +477,7 @@ def render_single_campaign_matrix():
                 st.dataframe(l1_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation %': '{:.1%}', 'Click Share %': '{:.1%}'}), use_container_width=True, hide_index=True)
             with col_c1: 
                 fig_l1 = px.bar(l1_sorted.melt(id_vars='L1_Category', value_vars=['Item Allocation %', 'Click Share %']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l1.update_layout(title=dict(text="L1 Category Share Allocation", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None))
+                fig_l1.update_layout(title=dict(text="Category Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% Share", tickformat='.1%'), xaxis=dict(title=None))
                 st.plotly_chart(fig_l1, use_container_width=True)
                 
         with tab_l2:

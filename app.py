@@ -636,6 +636,28 @@ def render_single_campaign_matrix():
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
             st.plotly_chart(fig, use_container_width=True)
+            # --- DYNAMIC STRATEGIC INSIGHT CALLOUT ---
+        if not df_sc_table.empty:
+            # 1. Find the exact cliff where readership drops below 50%
+            cliff_data = df_sc_table[df_sc_table['% of Users Read'] < 0.50]
+            
+            if not cliff_data.empty:
+                cliff_depth = cliff_data.iloc[0]['Scroll Depth']
+                cliff_ret = cliff_data.iloc[0]['% of Users Read']
+                cliff_pg = cliff_data.iloc[0]['Approx Page']
+                cliff_text = f"**The 'Half-Life' Cliff:** The data shows audience retention dropping below 50% at the **{cliff_depth}** mark (approx. Page {cliff_pg:.1f}), falling to **{cliff_ret:.1%}**. To guarantee visibility and maximize ROI, your absolute best, highest-margin items must be placed *before* this point."
+            else:
+                cliff_text = "**The 'Half-Life' Cliff:** Incredible retention! Your audience stays above 50% engagement throughout the entire flyer, giving you massive visibility across every single page."
+
+            # 2. Find the final "Loyalist" retention at the very end
+            final_ret = df_sc_table.iloc[-1]['% of Users Read']
+            
+            st.info(f"""
+            💡 **Dynamic Scroll Insights:** 
+            
+            * {cliff_text}
+            * **The Loyalists:** You successfully carried **{final_ret:.1%}** of your audience to the very end of the campaign. Because these dedicated shoppers will scroll regardless, the back pages remain an excellent location for niche, high-research, or long-tail product categories.
+            """)
 
 # ==============================================================================
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON

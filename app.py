@@ -911,7 +911,6 @@ def render_head_to_head_variance():
             )
             st.plotly_chart(fig, use_container_width=True)
 
-def render_taylors_workspace():
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================

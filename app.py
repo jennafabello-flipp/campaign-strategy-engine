@@ -1334,19 +1334,39 @@ def render_taylors_workspace():
 
     st.write("---")
     st.subheader("📍 Top 5 Items by Region & Item CTR")
-    unique_regions = [r for r in df_prod['Region'].unique() if pd.notna(r) and r != 'Other']
 
-    if unique_regions:
-        tab_reg = st.tabs(list(unique_regions))
-        for i, r in enumerate(unique_regions):
-            with tab_reg[i]:
-                reg_items = df_prod[df_prod['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
-                reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
-                reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
-                st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    # 🚨 SPLIT VIEW: Loop through each Flyer Run 🚨
+    flyer_runs = df_prod['Flyer Run Name'].dropna().unique()
+
+    if len(flyer_runs) == 0:
+        st.info("⚠️ No 'Flyer Run Name' data found in the upload.")
     else:
-        st.info("No localized regional items captured.")
+        for run in flyer_runs:
+            # Create a header for the specific run
+            st.markdown(f"#### 📅 Flyer Run: {run}")
+            
+            # ⚠️ Filter the master data down to just THIS run
+            df_run = df_prod[df_prod['Flyer Run Name'] == run].copy()
+            
+            # Use df_run here instead of df_prod to get the regions for this specific run
+            unique_regions = [r for r in df_run['Region'].unique() if pd.notna(r) and r != 'Other']
+
+            if unique_regions:
+                tab_reg = st.tabs(list(unique_regions))
+                for i, r in enumerate(unique_regions):
+                    with tab_reg[i]:
+                        # ⚠️ Notice we are pulling from df_run instead of df_prod now!
+                        reg_items = df_run[df_run['Region'] == r].groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        reg_items.rename(columns={'Clean_Name': 'Product Name'}, inplace=True)
+                        reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
+                        reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
+                        
+                        st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            else:
+                st.info(f"No localized regional items captured for {run}.")
+                
+            # Add a clean line break before it loops to the next Flyer Run
+            st.divider()
         
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

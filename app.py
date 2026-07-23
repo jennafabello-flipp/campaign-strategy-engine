@@ -688,10 +688,10 @@ def render_single_campaign_matrix():
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
 # ==============================================================================
            st.write("---")
-    st.header("⚖️ Head-to-Head Campaign Comparison")
-    st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
+           st.header("⚖️ Head-to-Head Campaign Comparison")
+           st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
 
-    # Dual-upload for Merchandise Metrics
+   # Dual-upload for Merchandise Metrics
     col1, col2 = st.columns(2)
     with col1:
         base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_merch")

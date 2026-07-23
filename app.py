@@ -754,29 +754,15 @@ def render_head_to_head_variance():
                 
                 return df
 
+            # Load the completely raw, unfiltered data
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
             
-            # 🚨 NEW: FILTER OUT MARKETING ASSETS (Keep only actual Products)
-            def filter_products(df):
-                # Filter to only include true Items
-                if 'Display Type' in df.columns:
-                    df = df[df['Display Type'].astype(str).str.upper() == 'ITEM']
-                
-                # Filter out missing or blank SKUs
-                if 'SKU' in df.columns:
-                    df = df[df['SKU'].notna()]
-                    df = df[df['SKU'].astype(str).str.strip() != '']
-                return df
-                
-            df_base = filter_products(df_base)
-            df_new = filter_products(df_new)
-
             # Determine Item Column
             item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else 'Merchandise Name'
 
             # ---------------------------------------------------------
-            # 📊 MACRO YOY SUMMARY TABLE
+            # 📊 MACRO YOY SUMMARY TABLE (Uses ALL data, including assets)
             # ---------------------------------------------------------
             if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
@@ -826,7 +812,7 @@ def render_head_to_head_variance():
                 st.warning("⚠️ Could not generate Macro Summary. Missing Views or Clicks data.")
 
             # ---------------------------------------------------------
-            # 📘 FRONT COVER PERFORMANCE
+            # 📘 FRONT COVER PERFORMANCE (Uses ALL data, including assets)
             # ---------------------------------------------------------
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
@@ -865,16 +851,30 @@ def render_head_to_head_variance():
                 st.error("⚠️ The column 'Page Position' was not found in one or both files.")
 
             # ---------------------------------------------------------
-            # 🎯 TOP 10 OVERALL ITEMS BY CTR & CLICKS
+            # 🎯 TOP 10 OVERALL ITEMS BY CTR & CLICKS (Filtered for Products ONLY)
             # ---------------------------------------------------------
-            if item_col in df_base.columns and item_col in df_new.columns:
-                if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+            
+            # Function to isolate items from marketing assets
+            def filter_products(df):
+                if 'Display Type' in df.columns:
+                    df = df[df['Display Type'].astype(str).str.upper() == 'ITEM']
+                if 'SKU' in df.columns:
+                    df = df[df['SKU'].notna()]
+                    df = df[df['SKU'].astype(str).str.strip() != '']
+                return df
+                
+            # Apply filter specifically to create isolated product datasets
+            df_base_items = filter_products(df_base)
+            df_new_items = filter_products(df_new)
+
+            if item_col in df_base_items.columns and item_col in df_new_items.columns:
+                if 'Views' in df_base_items.columns and 'Clicks' in df_base_items.columns:
                     
-                    # Aggregate entire dataset by item
-                    base_all_agg = df_base.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    # Aggregate entire filtered dataset by item
+                    base_all_agg = df_base_items.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     base_all_agg['CTR %'] = np.where(base_all_agg['Views'] > 0, base_all_agg['Clicks'] / base_all_agg['Views'], 0)
                     
-                    new_all_agg = df_new.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    new_all_agg = df_new_items.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     new_all_agg['CTR %'] = np.where(new_all_agg['Views'] > 0, new_all_agg['Clicks'] / new_all_agg['Views'], 0)
 
                     # Smart Filter: Minimum 50 Views for CTR Ranking
@@ -884,7 +884,7 @@ def render_head_to_head_variance():
                     # --- Top 10 by CTR ---
                     st.write("---")
                     st.subheader("🎯 Top-10 Clicked Items by CTR")
-                    st.markdown("*Ranked by Highest CTR (requires a minimum baseline of views)*")
+                    st.markdown("*Ranked by Highest CTR (requires a minimum baseline of views, excludes marketing assets)*")
                     
                     base_top_ctr = base_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[[item_col, 'Clicks', 'CTR %']]
                     base_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
@@ -903,7 +903,7 @@ def render_head_to_head_variance():
                     # --- Top 10 by Clicks ---
                     st.write("---")
                     st.subheader("🔥 Top-10 Clicked Items by Clicks")
-                    st.markdown("*Ranked by Highest Total Volume of Clicks*")
+                    st.markdown("*Ranked by Highest Total Volume of Clicks (excludes marketing assets)*")
                     
                     base_top_clicks = base_all_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
                     base_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)

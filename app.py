@@ -757,6 +757,21 @@ def render_head_to_head_variance():
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
             
+            # 🚨 NEW: FILTER OUT MARKETING ASSETS (Keep only actual Products)
+            def filter_products(df):
+                # Filter to only include true Items
+                if 'Display Type' in df.columns:
+                    df = df[df['Display Type'].astype(str).str.upper() == 'ITEM']
+                
+                # Filter out missing or blank SKUs
+                if 'SKU' in df.columns:
+                    df = df[df['SKU'].notna()]
+                    df = df[df['SKU'].astype(str).str.strip() != '']
+                return df
+                
+            df_base = filter_products(df_base)
+            df_new = filter_products(df_new)
+
             # Determine Item Column
             item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else 'Merchandise Name'
 
@@ -862,7 +877,7 @@ def render_head_to_head_variance():
                     new_all_agg = df_new.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     new_all_agg['CTR %'] = np.where(new_all_agg['Views'] > 0, new_all_agg['Clicks'] / new_all_agg['Views'], 0)
 
-                    # Smart Filter: Minimum 50 Views for CTR Ranking (avoids 1 click / 1 view = 100% anomalies)
+                    # Smart Filter: Minimum 50 Views for CTR Ranking
                     base_ctr_pool = base_all_agg[base_all_agg['Views'] >= 50] if len(base_all_agg[base_all_agg['Views'] >= 50]) >= 10 else base_all_agg
                     new_ctr_pool = new_all_agg[new_all_agg['Views'] >= 50] if len(new_all_agg[new_all_agg['Views'] >= 50]) >= 10 else new_all_agg
 

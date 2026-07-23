@@ -687,6 +687,9 @@ def render_single_campaign_matrix():
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
 # ==============================================================================
 def render_head_to_head_variance():
+    import pandas as pd
+    import numpy as np
+
     st.write("---")
     st.header("⚖️ Head-to-Head Campaign Comparison")
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
@@ -709,12 +712,14 @@ def render_head_to_head_variance():
     with col4:
         new_funnel_file = st.file_uploader("📤 Upload NEW Funnel Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_funnel")
 
-    if base_merch_file and new_merch_file:
+    # A button to run the comparison once files are dropped in
+    if st.button("🚀 Run Head-to-Head Analysis"):
+        
+        # --- 1. MERCHANDISE PROCESSING ---
+        if base_merch_file and new_merch_file:
             st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
-            import pandas as pd
-            import numpy as np
 
-            # 1. Helper function to read the uploaded files (handles both CSV and Excel)
+            # Helper function to read the uploaded files (handles both CSV and Excel)
             def load_data(file):
                 if file.name.endswith('.csv'):
                     return pd.read_csv(file)
@@ -723,27 +728,22 @@ def render_head_to_head_variance():
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
 
-            # 2. Standardize the Page Position column so '1' matches perfectly
+            # Standardize the Page Position column so '1' matches perfectly
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
-                # Convert to string and strip spaces just in case Excel added weird formatting
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
                 df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
 
-                # 3. Isolate the Front Cover data!
+                # Isolate the Front Cover data!
                 df_base_cover = df_base[df_base['Page Position'] == '1'].copy()
                 df_new_cover = df_new[df_new['Page Position'] == '1'].copy()
 
                 st.write("---")
                 st.subheader("📘 Front Cover Performance (Page 1)")
 
-                # 4. We will group by the Product Name to calculate Clicks and CTR
-                # ⚠️ We need to confirm the exact column name for the item name!
-                # For now, I am using 'Merchandise Name' as a placeholder.
-                
-                item_col = 'Merchandise Name' # <-- Change this if your column is named differently!
+                # ⚠️ If your item name column is different, update it here!
+                item_col = 'Merchandise Name' 
 
                 if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
-                    
                     # Aggregate Base Cover
                     base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
@@ -754,7 +754,7 @@ def render_head_to_head_variance():
                     new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
                     new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
 
-                    # 5. Draw the side-by-side comparison tables
+                    # Draw the side-by-side comparison tables
                     c1, c2 = st.columns(2)
                     with c1:
                         st.markdown("**Historical Cover (Base)**")
@@ -768,17 +768,12 @@ def render_head_to_head_variance():
             else:
                 st.error("⚠️ The column 'Page Position' was not found in one or both of the files. Please check the raw data.")
 
+        # --- 2. FUNNEL PROCESSING ---
         if base_funnel_file and new_funnel_file:
             st.success("Both Funnel files loaded! Ready to calculate Macro YoY...")
             # Funnel logic will go here next
             
-        if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):
-            st.warning("⚠️ Please upload BOTH Base and New files for either Merchandise or Funnel metrics to run the comparison.")
-            
-        if base_funnel_file and new_funnel_file:
-            st.success("Both Funnel files loaded! Ready to calculate Macro YoY...")
-            # We will build the funnel data processing logic here next!
-            
+        # --- 3. NO FILES WARNING ---
         if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):
             st.warning("⚠️ Please upload BOTH Base and New files for either Merchandise or Funnel metrics to run the comparison.")
             

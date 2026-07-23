@@ -721,13 +721,11 @@ def render_head_to_head_variance():
 
             # Smart loader that handles Flipp export metadata header rows automatically
             def load_data(file):
-                # Read raw first to find where actual headers start
                 if file.name.endswith('.csv'):
                     preview = pd.read_csv(file, header=None, nrows=15)
                 else:
                     preview = pd.read_excel(file, header=None, nrows=15)
                 
-                # Search for the row containing 'Weekly Date' or 'Flyer Run Name'
                 header_row = 0
                 for idx, row in preview.iterrows():
                     row_vals = [str(val).strip() for val in row.values]
@@ -735,14 +733,22 @@ def render_head_to_head_variance():
                         header_row = idx
                         break
 
-                # Read full data using detected header row
                 if file.name.endswith('.csv'):
                     df = pd.read_csv(file, header=header_row)
                 else:
                     df = pd.read_excel(file, header=header_row)
                 
-                # Clean column headers
                 df.columns = df.columns.astype(str).str.strip()
+                
+                # 🚨 THE FIX: Standardize column names automatically
+                rename_map = {
+                    'Total Item Views': 'Views',
+                    'Item Views': 'Views',
+                    'Total Item Clicks': 'Clicks',
+                    'Item Clicks': 'Clicks'
+                }
+                df.rename(columns=rename_map, inplace=True)
+                
                 return df
 
             df_base = load_data(base_merch_file)
@@ -764,26 +770,32 @@ def render_head_to_head_variance():
                 item_col = 'Clean_Name' if 'Clean_Name' in df_base_cover.columns else 'Merchandise Name'
 
                 if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
-                    # Aggregate Base Cover
-                    base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
-                    base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
-                    base_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                    
+                    # ⚠️ Added safety check to ensure we only proceed if Views and Clicks successfully mapped
+                    if 'Views' in df_base_cover.columns and 'Clicks' in df_base_cover.columns:
+                        
+                        # Aggregate Base Cover
+                        base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
+                        base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        base_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
-                    # Aggregate New Cover
-                    new_agg = df_new_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
-                    new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
-                    new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                        # Aggregate New Cover
+                        new_agg = df_new_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
+                        new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
-                    # Render side-by-side comparison tables
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown("**Historical Cover (Base)**")
-                        st.dataframe(base_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                    with c2:
-                        st.markdown("**Current Cover (New)**")
-                        st.dataframe(new_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        # Render side-by-side comparison tables
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown("**Historical Cover (Base)**")
+                            st.dataframe(base_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        with c2:
+                            st.markdown("**Current Cover (New)**")
+                            st.dataframe(new_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                    else:
+                        st.error("Error: Could not locate standard View and Click columns in the raw data.")
                 else:
                     st.error(f"Could not find item column ('{item_col}'). Available columns: {list(df_base_cover.columns)}")
 

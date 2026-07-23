@@ -808,8 +808,6 @@ def render_head_to_head_variance():
                     return ''
 
                 st.dataframe(df_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
-            else:
-                st.warning("⚠️ Could not generate Macro Summary. Missing Views or Clicks data.")
 
             # ---------------------------------------------------------
             # 📘 FRONT COVER PERFORMANCE (Uses ALL data, including assets)
@@ -843,18 +841,10 @@ def render_head_to_head_variance():
                         with c2:
                             st.markdown("**Current Cover (New)**")
                             st.dataframe(new_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                    else:
-                        st.error("Error: Could not locate standard View and Click columns in the raw data.")
-                else:
-                    st.error(f"Could not find item column ('{item_col}').")
-            else:
-                st.error("⚠️ The column 'Page Position' was not found in one or both files.")
 
             # ---------------------------------------------------------
-            # 🎯 TOP 10 OVERALL ITEMS BY CTR & CLICKS (Filtered for Products ONLY)
+            # 🎯 TOP 10 OVERALL ITEMS BY CTR & CLICKS (Products ONLY)
             # ---------------------------------------------------------
-            
-            # Function to isolate items from marketing assets
             def filter_products(df):
                 if 'Display Type' in df.columns:
                     df = df[df['Display Type'].astype(str).str.upper() == 'ITEM']
@@ -863,25 +853,21 @@ def render_head_to_head_variance():
                     df = df[df['SKU'].astype(str).str.strip() != '']
                 return df
                 
-            # Apply filter specifically to create isolated product datasets
             df_base_items = filter_products(df_base)
             df_new_items = filter_products(df_new)
 
             if item_col in df_base_items.columns and item_col in df_new_items.columns:
                 if 'Views' in df_base_items.columns and 'Clicks' in df_base_items.columns:
                     
-                    # Aggregate entire filtered dataset by item
                     base_all_agg = df_base_items.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     base_all_agg['CTR %'] = np.where(base_all_agg['Views'] > 0, base_all_agg['Clicks'] / base_all_agg['Views'], 0)
                     
                     new_all_agg = df_new_items.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     new_all_agg['CTR %'] = np.where(new_all_agg['Views'] > 0, new_all_agg['Clicks'] / new_all_agg['Views'], 0)
 
-                    # Smart Filter: Minimum 50 Views for CTR Ranking
                     base_ctr_pool = base_all_agg[base_all_agg['Views'] >= 50] if len(base_all_agg[base_all_agg['Views'] >= 50]) >= 10 else base_all_agg
                     new_ctr_pool = new_all_agg[new_all_agg['Views'] >= 50] if len(new_all_agg[new_all_agg['Views'] >= 50]) >= 10 else new_all_agg
 
-                    # --- Top 10 by CTR ---
                     st.write("---")
                     st.subheader("🎯 Top-10 Clicked Items by CTR")
                     st.markdown("*Ranked by Highest CTR (requires a minimum baseline of views, excludes marketing assets)*")
@@ -900,7 +886,6 @@ def render_head_to_head_variance():
                         st.markdown("**Current Top CTR (New)**")
                         st.dataframe(new_top_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-                    # --- Top 10 by Clicks ---
                     st.write("---")
                     st.subheader("🔥 Top-10 Clicked Items by Clicks")
                     st.markdown("*Ranked by Highest Total Volume of Clicks (excludes marketing assets)*")
@@ -918,6 +903,68 @@ def render_head_to_head_variance():
                     with c6:
                         st.markdown("**Current Top Clicks (New)**")
                         st.dataframe(new_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+            # ---------------------------------------------------------
+            # 🖼️ TOP 10 MARKETING ASSETS BY CTR & CLICKS (Assets ONLY)
+            # ---------------------------------------------------------
+            def filter_assets(df):
+                if 'Display Type' in df.columns:
+                    # Filter for 'LINK' instead of 'ITEM'
+                    df = df[df['Display Type'].astype(str).str.upper() == 'LINK']
+                return df
+                
+            df_base_assets = filter_assets(df_base)
+            df_new_assets = filter_assets(df_new)
+
+            if item_col in df_base_assets.columns and item_col in df_new_assets.columns:
+                # Only try to display the asset tables if there are actually assets present
+                if len(df_base_assets) > 0 or len(df_new_assets) > 0:
+                    if 'Views' in df_base_assets.columns and 'Clicks' in df_base_assets.columns:
+                        
+                        base_asset_agg = df_base_assets.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        base_asset_agg['CTR %'] = np.where(base_asset_agg['Views'] > 0, base_asset_agg['Clicks'] / base_asset_agg['Views'], 0)
+                        
+                        new_asset_agg = df_new_assets.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        new_asset_agg['CTR %'] = np.where(new_asset_agg['Views'] > 0, new_asset_agg['Clicks'] / new_asset_agg['Views'], 0)
+
+                        base_asset_ctr_pool = base_asset_agg[base_asset_agg['Views'] >= 50] if len(base_asset_agg[base_asset_agg['Views'] >= 50]) > 0 else base_asset_agg
+                        new_asset_ctr_pool = new_asset_agg[new_asset_agg['Views'] >= 50] if len(new_asset_agg[new_asset_agg['Views'] >= 50]) > 0 else new_asset_agg
+
+                        st.write("---")
+                        st.subheader("🖼️ Top-10 Marketing Assets by CTR")
+                        st.markdown("*Ranked by Highest CTR (marketing banners/links only)*")
+                        
+                        base_top_asset_ctr = base_asset_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        base_top_asset_ctr.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        
+                        new_top_asset_ctr = new_asset_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        new_top_asset_ctr.rename(columns={item_col: 'Asset Name'}, inplace=True)
+
+                        c7, c8 = st.columns(2)
+                        with c7:
+                            st.markdown("**Historical Top Assets (Base)**")
+                            st.dataframe(base_top_asset_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        with c8:
+                            st.markdown("**Current Top Assets (New)**")
+                            st.dataframe(new_top_asset_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+                        st.write("---")
+                        st.subheader("📢 Top-10 Marketing Assets by Clicks")
+                        st.markdown("*Ranked by Highest Total Volume of Clicks (marketing banners/links only)*")
+                        
+                        base_top_asset_clicks = base_asset_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        base_top_asset_clicks.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        
+                        new_top_asset_clicks = new_asset_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                        new_top_asset_clicks.rename(columns={item_col: 'Asset Name'}, inplace=True)
+
+                        c9, c10 = st.columns(2)
+                        with c9:
+                            st.markdown("**Historical Top Clicks (Base)**")
+                            st.dataframe(base_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        with c10:
+                            st.markdown("**Current Top Clicks (New)**")
+                            st.dataframe(new_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # --- 2. FUNNEL PROCESSING ---
         if base_funnel_file and new_funnel_file:

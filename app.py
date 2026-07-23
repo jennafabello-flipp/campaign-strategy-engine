@@ -730,7 +730,6 @@ def render_head_to_head_variance():
                 header_row = 0
                 for idx, row in preview.iterrows():
                     row_vals = [str(val).strip() for val in row.values]
-                    # Looking for common Flipp export headers to find the start row
                     if 'Weekly Date' in row_vals or 'Flyer Run Name' in row_vals or 'Impressions' in row_vals:
                         header_row = idx
                         break
@@ -748,17 +747,21 @@ def render_head_to_head_variance():
             def extract_funnel_metrics(df):
                 def get_sum(col_idx):
                     return pd.to_numeric(df.iloc[:, col_idx], errors='coerce').sum() if col_idx < len(df.columns) else 0
-                def get_avg(col_idx):
-                    return pd.to_numeric(df.iloc[:, col_idx], errors='coerce').mean() if col_idx < len(df.columns) else 0
+
+                tot_time_sec = get_sum(24)     # Col Y (Time Spent in Seconds)
+                tot_sessions = get_sum(20)     # Col U (Flyer Sessions)
+                
+                # Formula: (Time on flyer / Flyer sessions) / 60 = Avg Minutes Per Session
+                avg_time_mins = (tot_time_sec / tot_sessions / 60) if tot_sessions > 0 else 0
 
                 return {
                     "Impressions": get_sum(13),             # Col N
                     "Flyer Opens": get_sum(15),             # Col P
                     "Unique Engagements": get_sum(17),      # Col R
                     "Total Flyer Clicks": get_sum(19),      # Col T
-                    "Total Transfer to Site": get_sum(22),  # Col W
-                    "Avg Time Spent (s)": get_avg(23),      # Col X
-                    "Total Shopping List Adds": get_sum(25) # Col Z
+                    "Total Transfer to Site": get_sum(23),  # Col X
+                    "Avg Time Spent Mins": avg_time_mins,   # Calculated Mins per Session
+                    "Total Shopping List Adds": get_sum(26) # Col AA
                 }
 
             b_metrics = extract_funnel_metrics(f_base)
@@ -778,7 +781,7 @@ def render_head_to_head_variance():
                 "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
                 "Transfer to Site": [f"{b_metrics['Total Transfer to Site']:,.0f}", f"{n_metrics['Total Transfer to Site']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Transfer to Site'], b_metrics['Total Transfer to Site']):+.2%}"],
                 "Shopping List Adds": [f"{b_metrics['Total Shopping List Adds']:,.0f}", f"{n_metrics['Total Shopping List Adds']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Shopping List Adds'], b_metrics['Total Shopping List Adds']):+.2%}"],
-                "Avg Time Spent (s)": [f"{b_metrics['Avg Time Spent (s)']:.1f}s", f"{n_metrics['Avg Time Spent (s)']:.1f}s", f"{get_funnel_yoy(n_metrics['Avg Time Spent (s)'], b_metrics['Avg Time Spent (s)']):+.2%}"]
+                "Avg Time Spent": [f"{b_metrics['Avg Time Spent Mins']:.2f} mins", f"{n_metrics['Avg Time Spent Mins']:.2f} mins", f"{get_funnel_yoy(n_metrics['Avg Time Spent Mins'], b_metrics['Avg Time Spent Mins']):+.2%}"]
             }
             
             df_funnel_summary = pd.DataFrame(funnel_data)

@@ -756,29 +756,29 @@ def render_head_to_head_variance():
 
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
+            
+            # Determine Item Column
+            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else 'Merchandise Name'
 
             # ---------------------------------------------------------
-            # 📊 NEW: MACRO YOY SUMMARY TABLE
+            # 📊 MACRO YOY SUMMARY TABLE
             # ---------------------------------------------------------
             if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
                 st.subheader("📈 Macro Item-Level Performance (YoY)")
 
-                # Base Calcs
                 b_views = df_base['Views'].sum()
                 b_clicks = df_base['Clicks'].sum()
                 b_ctr = b_clicks / b_views if b_views > 0 else 0
                 b_ttms = df_base['TTMs'].sum() if 'TTMs' in df_base.columns else 0
                 b_ttmr = b_ttms / b_views if b_views > 0 else 0
 
-                # New Calcs
                 n_views = df_new['Views'].sum()
                 n_clicks = df_new['Clicks'].sum()
                 n_ctr = n_clicks / n_views if n_views > 0 else 0
                 n_ttms = df_new['TTMs'].sum() if 'TTMs' in df_new.columns else 0
                 n_ttmr = n_ttms / n_views if n_views > 0 else 0
 
-                # Variance Calcs
                 def get_yoy(new_val, base_val):
                     return (new_val - base_val) / base_val if base_val > 0 else 0
 
@@ -788,7 +788,6 @@ def render_head_to_head_variance():
                 y_ttms = get_yoy(n_ttms, b_ttms)
                 y_ttmr = get_yoy(n_ttmr, b_ttmr)
 
-                # Build the DataFrame
                 summary_data = {
                     "Metric": ["Historical (Base)", "Current (New)", "YoY Variance"],
                     "Total Item Views": [f"{b_views:,.0f}", f"{n_views:,.0f}", f"{y_views:+.2%}"],
@@ -799,16 +798,14 @@ def render_head_to_head_variance():
                 }
                 df_summary = pd.DataFrame(summary_data)
 
-                # Custom function to color the +/- percentages
                 def color_yoy_cells(val):
                     if isinstance(val, str):
                         if val.startswith('+') and val != '+0.00%':
-                            return 'color: #28a745; font-weight: bold;' # Green
+                            return 'color: #28a745; font-weight: bold;'
                         elif val.startswith('-'):
-                            return 'color: #fd7e14; font-weight: bold;' # Orange
+                            return 'color: #fd7e14; font-weight: bold;'
                     return ''
 
-                # Render the stylized table
                 st.dataframe(df_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
             else:
                 st.warning("⚠️ Could not generate Macro Summary. Missing Views or Clicks data.")
@@ -826,11 +823,8 @@ def render_head_to_head_variance():
                 st.write("---")
                 st.subheader("📘 Front Cover Performance (Page 1)")
 
-                item_col = 'Clean_Name' if 'Clean_Name' in df_base_cover.columns else 'Merchandise Name'
-
                 if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
                     if 'Views' in df_base_cover.columns and 'Clicks' in df_base_cover.columns:
-                        
                         base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                         base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
                         base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
@@ -851,9 +845,64 @@ def render_head_to_head_variance():
                     else:
                         st.error("Error: Could not locate standard View and Click columns in the raw data.")
                 else:
-                    st.error(f"Could not find item column ('{item_col}'). Available columns: {list(df_base_cover.columns)}")
+                    st.error(f"Could not find item column ('{item_col}').")
             else:
                 st.error("⚠️ The column 'Page Position' was not found in one or both files.")
+
+            # ---------------------------------------------------------
+            # 🎯 TOP 10 OVERALL ITEMS BY CTR & CLICKS
+            # ---------------------------------------------------------
+            if item_col in df_base.columns and item_col in df_new.columns:
+                if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+                    
+                    # Aggregate entire dataset by item
+                    base_all_agg = df_base.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    base_all_agg['CTR %'] = np.where(base_all_agg['Views'] > 0, base_all_agg['Clicks'] / base_all_agg['Views'], 0)
+                    
+                    new_all_agg = df_new.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    new_all_agg['CTR %'] = np.where(new_all_agg['Views'] > 0, new_all_agg['Clicks'] / new_all_agg['Views'], 0)
+
+                    # Smart Filter: Minimum 50 Views for CTR Ranking (avoids 1 click / 1 view = 100% anomalies)
+                    base_ctr_pool = base_all_agg[base_all_agg['Views'] >= 50] if len(base_all_agg[base_all_agg['Views'] >= 50]) >= 10 else base_all_agg
+                    new_ctr_pool = new_all_agg[new_all_agg['Views'] >= 50] if len(new_all_agg[new_all_agg['Views'] >= 50]) >= 10 else new_all_agg
+
+                    # --- Top 10 by CTR ---
+                    st.write("---")
+                    st.subheader("🎯 Top-10 Clicked Items by CTR")
+                    st.markdown("*Ranked by Highest CTR (requires a minimum baseline of views)*")
+                    
+                    base_top_ctr = base_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    base_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                    
+                    new_top_ctr = new_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    new_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+
+                    c3, c4 = st.columns(2)
+                    with c3:
+                        st.markdown("**Historical Top CTR (Base)**")
+                        st.dataframe(base_top_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                    with c4:
+                        st.markdown("**Current Top CTR (New)**")
+                        st.dataframe(new_top_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+                    # --- Top 10 by Clicks ---
+                    st.write("---")
+                    st.subheader("🔥 Top-10 Clicked Items by Clicks")
+                    st.markdown("*Ranked by Highest Total Volume of Clicks*")
+                    
+                    base_top_clicks = base_all_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    base_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                    
+                    new_top_clicks = new_all_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    new_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+
+                    c5, c6 = st.columns(2)
+                    with c5:
+                        st.markdown("**Historical Top Clicks (Base)**")
+                        st.dataframe(base_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                    with c6:
+                        st.markdown("**Current Top Clicks (New)**")
+                        st.dataframe(new_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # --- 2. FUNNEL PROCESSING ---
         if base_funnel_file and new_funnel_file:

@@ -1327,7 +1327,7 @@ elif "Taylor's Workspace" in pipeline_mode:
 # ==============================================================================
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
 # ==============================================================================
-def render_head_to_head_module():
+def render_head_to_head_variance():
     st.write("---")
     st.header("⚖️ Head-to-Head Campaign Comparison")
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")

@@ -692,6 +692,7 @@ def render_head_to_head_variance():
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
 
     # Dual-upload for Merchandise Metrics
+    st.markdown("### 🛒 Merchandise Metrics")
     col1, col2 = st.columns(2)
     with col1:
         base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_merch")
@@ -700,18 +701,26 @@ def render_head_to_head_variance():
 
     # Optional Funnel Metrics (Standalone)
     st.markdown("### 📊 Optional: Funnel Metrics")
-    st.info("Upload Funnel Metrics to unlock Macro YoY Performance (Opens, UEV, Time Spent). This will run independently even without Merchandise files.")
-    funnel_file = st.file_uploader("📤 Upload Funnel Metrics", type=['csv', 'xlsx'], key="funnel_metrics")
+    st.info("Upload Base and New Funnel Metrics to unlock Macro YoY Performance (Opens, UEV, Time Spent). This runs independently even without Merchandise files.")
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        base_funnel_file = st.file_uploader("📤 Upload BASE Funnel Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_funnel")
+    with col4:
+        new_funnel_file = st.file_uploader("📤 Upload NEW Funnel Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_funnel")
 
     # A button to run the comparison once files are dropped in
     if st.button("🚀 Run Head-to-Head Analysis"):
         if base_merch_file and new_merch_file:
-            st.success("Both Merchandise files loaded! Ready to calculate YoY...")
-            # We will build the data processing logic here next!
-        elif funnel_file:
-            st.success("Funnel file loaded! Running Macro metrics...")
-        else:
-            st.warning("Please upload at least the Base and New Merchandise files, or a Funnel file.")
+            st.success("Both Merchandise files loaded! Ready to calculate item YoY...")
+            # We will build the merchandise data processing logic here next!
+            
+        if base_funnel_file and new_funnel_file:
+            st.success("Both Funnel files loaded! Ready to calculate Macro YoY...")
+            # We will build the funnel data processing logic here next!
+            
+        if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):
+            st.warning("⚠️ Please upload BOTH Base and New files for either Merchandise or Funnel metrics to run the comparison.")
             
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)

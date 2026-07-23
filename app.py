@@ -1367,6 +1367,52 @@ def render_taylors_workspace():
                 
             # Add a clean line break before it loops to the next Flyer Run
             st.divider()
+
+      st.write("---")
+    st.subheader("🏆 Top 10 Items by Clicks & CTR (Per Flyer Run)")
+
+    # 1. Grab the unique runs
+    flyer_runs = df_prod['Flyer Run Name'].dropna().unique()
+
+    if len(flyer_runs) == 0:
+        st.info("⚠️ No 'Flyer Run Name' data found in the upload.")
+    else:
+        # 2. Start the loop for each run
+        for run in flyer_runs:
+            
+            st.markdown(f"#### 📅 Flyer Run: {run}")
+            
+            # Filter to JUST this run
+            df_run = df_prod[df_prod['Flyer Run Name'] == run].copy()
+            
+            # Aggregate the Views and Clicks for every item in this specific run
+            item_stats = df_run.groupby('Clean_Name').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+            
+            # Calculate CTR safely (avoiding dividing by zero)
+            item_stats['Item CTR'] = np.where(item_stats['Views'] > 0, item_stats['Clicks'] / item_stats['Views'], 0)
+            
+            # Rename columns to match your exact request
+            item_stats.rename(columns={'Clean_Name': 'Merchandise Name', 'Clicks': 'Total Clicks'}, inplace=True)
+            
+            # 📊 Build Table 1: Top 10 by Total Clicks
+            top_10_clicks = item_stats.sort_values(by='Total Clicks', ascending=False).head(10)[['Merchandise Name', 'Total Clicks']]
+            
+            # 📊 Build Table 2: Top 10 by Item CTR (using Clicks as a tie-breaker!)
+            top_10_ctr = item_stats.sort_values(by=['Item CTR', 'Total Clicks'], ascending=[False, False]).head(10)[['Merchandise Name', 'Item CTR']]
+            
+            # 3. Create the side-by-side layout
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**🔥 Top 10 by Total Clicks**")
+                st.dataframe(top_10_clicks.style.format({'Total Clicks': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                
+            with col2:
+                st.markdown("**🎯 Top 10 by Item CTR**")
+                st.dataframe(top_10_ctr.style.format({'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+                
+            # Draw a clean line before looping to the next run
+            st.divider()
         
 # ==============================================================================
 # 🏆 MODULE 3: INDUSTRY BENCHMARKS

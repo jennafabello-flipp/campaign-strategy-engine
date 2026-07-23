@@ -685,35 +685,6 @@ def render_single_campaign_matrix():
             """)
 
 # ==============================================================================
-# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
-# ==============================================================================
-           st.write("---")
-           st.header("⚖️ Head-to-Head Campaign Comparison")
-           st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
-
-   # Dual-upload for Merchandise Metrics
-    col1, col2 = st.columns(2)
-    with col1:
-        base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_merch")
-    with col2:
-        new_merch_file = st.file_uploader("📤 Upload NEW Merchandise Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_merch")
-
-    # Optional Funnel Metrics (Standalone)
-    st.markdown("### 📊 Optional: Funnel Metrics")
-    st.info("Upload Funnel Metrics to unlock Macro YoY Performance (Opens, UEV, Time Spent). This will run independently even without Merchandise files.")
-    funnel_file = st.file_uploader("📤 Upload Funnel Metrics", type=['csv', 'xlsx'], key="funnel_metrics")
-
-    # A button to run the comparison once files are dropped in
-    if st.button("🚀 Run Head-to-Head Analysis"):
-        if base_merch_file and new_merch_file:
-            st.success("Both Merchandise files loaded! Ready to calculate YoY...")
-            # We will build the data processing logic here next!
-        elif funnel_file:
-            st.success("Funnel file loaded! Running Macro metrics...")
-        else:
-            st.warning("Please upload at least the Base and New Merchandise files, or a Funnel file.")
-
-# ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================
 # 🚨 MEMORY SAVER: Cache the USPS reference file so it only loads into RAM once!
@@ -1352,3 +1323,33 @@ elif "Industry Benchmarks" in pipeline_mode:
     render_benchmark_scorecard()
 elif "Taylor's Workspace" in pipeline_mode:
     render_taylors_workspace()
+
+# ==============================================================================
+# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
+# ==============================================================================
+def render_head_to_head_module():
+    st.write("---")
+    st.header("⚖️ Head-to-Head Campaign Comparison")
+    st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
+
+    # Dual-upload for Merchandise Metrics
+    col1, col2 = st.columns(2)
+    with col1:
+        base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_merch")
+    with col2:
+        new_merch_file = st.file_uploader("📤 Upload NEW Merchandise Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_merch")
+
+    # Optional Funnel Metrics (Standalone)
+    st.markdown("### 📊 Optional: Funnel Metrics")
+    st.info("Upload Funnel Metrics to unlock Macro YoY Performance (Opens, UEV, Time Spent). This will run independently even without Merchandise files.")
+    funnel_file = st.file_uploader("📤 Upload Funnel Metrics", type=['csv', 'xlsx'], key="funnel_metrics")
+
+    # A button to run the comparison once files are dropped in
+    if st.button("🚀 Run Head-to-Head Analysis"):
+        if base_merch_file and new_merch_file:
+            st.success("Both Merchandise files loaded! Ready to calculate YoY...")
+            # We will build the data processing logic here next!
+        elif funnel_file:
+            st.success("Funnel file loaded! Running Macro metrics...")
+        else:
+            st.warning("Please upload at least the Base and New Merchandise files, or a Funnel file.")

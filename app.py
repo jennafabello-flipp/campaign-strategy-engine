@@ -1081,48 +1081,63 @@ def render_taylors_workspace():
 
         df_prod['Clean_Name'] = df_prod['Name'].apply(taylor_name_scrubber)
 
-        # 🚨 THE UPGRADED AI CATEGORY ENGINE (PERMANENT FIXES) 🚨
-        def get_taylor_cat(name, l1, l2):
-            # Combine the name and categories, and pad with spaces for safe checking
-            text = f" {name} {l1} {l2} ".lower()
+            # 🚨 THE UPGRADED AI CATEGORY ENGINE (PRODUCT TITLE ONLY) 🚨
+        def get_taylor_cat(name):
+            # We ONLY look at the product name now. L1 and L2 are completely ignored!
+            text = f" {name} ".lower()
 
             # --- 1. PRIORITY OVERRIDES (Intercepts tricky items before standard rules) ---
-            if any(w in text for w in ['jerky', 'beef stick', 'protein bar', 'snack bar', 'chocolate bar', 'rxbar', 'granola']): 
+            if any(w in text for w in ['jerky', 'beef stick', 'protein bar', 'snack bar', 'chocolate bar', 'rxbar', 'granola', 'cracker']): 
                 return 'Grocery'
+            
+            if 'salad' in text:
+                return 'Produce' 
+                
             if any(w in text for w in ['freezer pop', 'jimmy dean', 'skillet meal', 'popcorn chicken', 'nugget', 'breaded chicken', 'bowl']):
                 return 'Frozen'
-            if 'iced tea' in text or 'coconut water' in text:
+                
+            if any(w in text for w in ['iced tea', 'coconut water', 'iced coffee']):
                 return 'Beverages'
+                
+            if any(w in text for w in ['cream cheese', 'cottage cheese']):
+                return 'Dairy' 
+                
+            if 'yasso' in text:
+                return 'Ice Cream'
 
-            # --- 2. STANDARD RULES ---
-            if any(w in text for w in ['wine', 'beer', 'spirit', 'vodka', 'whiskey', 'rum', 'gin', 'tequila', 'cooler', 'cider', 'ale', 'lager', 'liquor', 'alcohol']): return 'Alcohol'
+            # --- 2. STRICT REGEX BOUNDARIES ---
+            import re
+            if re.search(r'\b(wine|beer|spirit|spirits|vodka|whiskey|rum|gin|tequila|cooler|cider|ale|lager|liquor|alcohol)\b', text): return 'Alcohol'
+
+            # --- 3. STANDARD RULES ---
             if 'bacon' in text: return 'Bacon'
+            
             if any(w in text for w in ['butter', 'margarine', 'ghee']) and not any(w in text for w in ['peanut', 'almond']): return 'Butter'
             if any(w in text for w in ['ice cream', 'gelato', 'sorbet', 'popsicle', 'freezie']): return 'Ice Cream'
-            if any(w in text for w in ['milk', 'sour cream', 'cottage cheese', 'cream cheese', 'yogurt', 'cream', 'oat', 'soy', 'dairy']): return 'Dairy'
+            
             if any(w in text for w in ['cheese', 'cheddar', 'mozzarella', 'brie', 'feta', 'parmesan', 'provolone', 'gouda']): return 'Cheese'
+            if any(w in text for w in ['milk', 'yogurt', 'cream', 'oat', 'soy', 'dairy']): return 'Dairy'
+            
             if 'egg' in text and not any(w in text for w in ['chocolate', 'easter', 'cadbury', 'leg']): return 'Eggs'
             if any(w in text for w in ['frozen', 'pizza', 'waffle']) and not any(w in text for w in ['bread', 'pie']): return 'Frozen'
             if any(w in text for w in ['salmon', 'shrimp', 'cod', 'tuna', 'fish', 'lobster', 'crab', 'scallop', 'seafood', 'oyster', 'tilapia']): return 'Seafood'
             
-            # Fresh Meat (Ignores jerky and sticks because we caught them in Priority 1!)
             if any(w in text for w in ['beef', 'chicken', 'pork', 'steak', 'ground', 'ribs', 'chops', 'veal', 'lamb', 'turkey', 'sausage', 'burger', 'crooked willow', 'poultry', 'meat', 'roast', 'breast', 'thigh']): return 'Fresh Meat'
-            
             if any(w in text for w in ['deli', 'cold cut', 'salami', 'prosciutto', 'ham', 'hummus', 'roast beef']): return 'Deli'
             
-            # Bakery (Now actively ignores "bar" so snack bars don't get trapped here if they have 'bread' in the name)
             if any(w in text for w in ['bread', 'bun', 'croissant', 'muffin', 'bagel', 'cake', 'pie', 'pastry', 'tart', 'bakery']) and not any(w in text for w in ['oreo', 'cookie', 'frozen', 'bar']): return 'Bakery'
             
-            if any(w in text for w in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'salad', 'berries', 'grape', 'orange', 'carrot', 'broccoli', 'produce']): return 'Produce'
+            if any(w in text for w in ['apple', 'banana', 'lettuce', 'tomato', 'potato', 'onion', 'fruit', 'vegetable', 'berries', 'grape', 'orange', 'carrot', 'broccoli', 'produce']): return 'Produce'
             
-            # Beverages, Home & Pet (Using strict Regex boundaries so short words like "pop", "tea", "home" don't trigger by accident)
-            import re
             if re.search(r'\b(juice|pop|soda|water|coffee|tea|coke|pepsi|sprite|beverage|drink)\b', text): return 'Beverages'
-            if re.search(r'\b(paper towel|toilet paper|detergent|cleaner|foil|garbage bag|soap|shampoo|toothpaste|tissue|napkin|trash bag|home)\b', text): return 'Home'
+            if re.search(r'\b(paper towel|toilet paper|detergent|cleaner|foil|garbage bag|soap|shampoo|toothpaste|tissue|napkin|trash bag|home|cutlery)\b', text): return 'Home'
             if re.search(r'\b(cat|dog|pet|litter|kibble|purina|treat|churu)\b', text): return 'Pet'
 
-            # The Catch-All
+            # Catch-All
             return 'Grocery'
+
+        # Safely assign to your existing expected column 'cat_m' passing ONLY the Clean_Name
+        df_prod['cat_m'] = df_prod['Clean_Name'].apply(get_taylor_cat)
 
         # Safely assign to your existing expected column 'cat_m'
         df_prod['cat_m'] = df_prod.apply(lambda row: get_taylor_cat(row['Clean_Name'], row['L1_Category'], row['L2_Category']), axis=1)

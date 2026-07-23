@@ -719,42 +719,64 @@ def render_head_to_head_variance():
         if base_merch_file and new_merch_file:
             st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
 
-            # Helper function to read the uploaded files (handles both CSV and Excel)
+            # Smart loader that handles Flipp export metadata header rows automatically
             def load_data(file):
+                # Read raw first to find where actual headers start
                 if file.name.endswith('.csv'):
-                    return pd.read_csv(file)
-                return pd.read_excel(file)
+                    preview = pd.read_csv(file, header=None, nrows=15)
+                else:
+                    preview = pd.read_excel(file, header=None, nrows=15)
+                
+                # Search for the row containing 'Weekly Date' or 'Flyer Run Name'
+                header_row = 0
+                for idx, row in preview.iterrows():
+                    row_vals = [str(val).strip() for val in row.values]
+                    if 'Weekly Date' in row_vals or 'Flyer Run Name' in row_vals or 'Page Position' in row_vals:
+                        header_row = idx
+                        break
+
+                # Read full data using detected header row
+                if file.name.endswith('.csv'):
+                    df = pd.read_csv(file, header=header_row)
+                else:
+                    df = pd.read_excel(file, header=header_row)
+                
+                # Clean column headers
+                df.columns = df.columns.astype(str).str.strip()
+                return df
 
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
 
-            # Standardize the Page Position column so '1' matches perfectly
+            # Standardize 'Page Position' column
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
                 df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
 
-                # Isolate the Front Cover data!
+                # Isolate Page 1 Front Cover items
                 df_base_cover = df_base[df_base['Page Position'] == '1'].copy()
                 df_new_cover = df_new[df_new['Page Position'] == '1'].copy()
 
                 st.write("---")
                 st.subheader("📘 Front Cover Performance (Page 1)")
 
-                # ⚠️ If your item name column is different, update it here!
-                item_col = 'Merchandise Name' 
+                # Identify product name column (checks for 'Clean_Name' first, then fallback)
+                item_col = 'Clean_Name' if 'Clean_Name' in df_base_cover.columns else 'Merchandise Name'
 
                 if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
                     # Aggregate Base Cover
                     base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
                     base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    base_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
                     # Aggregate New Cover
                     new_agg = df_new_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
                     new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
+                    new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
-                    # Draw the side-by-side comparison tables
+                    # Render side-by-side comparison tables
                     c1, c2 = st.columns(2)
                     with c1:
                         st.markdown("**Historical Cover (Base)**")
@@ -763,15 +785,15 @@ def render_head_to_head_variance():
                         st.markdown("**Current Cover (New)**")
                         st.dataframe(new_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
                 else:
-                    st.error(f"Could not find the column '{item_col}'. Please update the 'item_col' variable in the code to match your file!")
+                    st.error(f"Could not find item column ('{item_col}'). Available columns: {list(df_base_cover.columns)}")
 
             else:
-                st.error("⚠️ The column 'Page Position' was not found in one or both of the files. Please check the raw data.")
+                st.error("⚠️ The column 'Page Position' was not found in one or both files.")
 
         # --- 2. FUNNEL PROCESSING ---
         if base_funnel_file and new_funnel_file:
             st.success("Both Funnel files loaded! Ready to calculate Macro YoY...")
-            # Funnel logic will go here next
+            # Funnel logic goes here next
             
         # --- 3. NO FILES WARNING ---
         if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):

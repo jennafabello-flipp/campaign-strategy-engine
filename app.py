@@ -1099,7 +1099,7 @@ def render_taylors_workspace():
             if any(w in text for w in ['jerky', 'beef stick', 'protein bar', 'snack bar', 'chocolate bar', 'rxbar', 'granola', 'cracker']): 
                 return 'Grocery'
             
-            if any(w in text for w in ['salad', 'cucumbers', 'watermelons', 'papayas', 'peaches', 'nectarines', 'bananas', 'onions', 'lemons', 'limes',]):
+            if any(w in text for w in ['salad', 'cucumbers', 'watermelons', 'papayas', 'peaches', 'nectarines', 'bananas', 'onions', 'lemons', 'limes', 'avocados', 'cherries', 'tomatoes', 'corn', 'grapes', 'mangos', 'strawberries', 'blueberries', 'raspberries']):
                 return 'Produce' 
                 
             if any(w in text for w in ['freezer pop', 'jimmy dean', 'skillet meal', 'popcorn chicken', 'nugget', 'breaded chicken', 'bowl']):

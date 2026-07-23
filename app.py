@@ -1087,6 +1087,15 @@ def render_taylors_workspace():
             text = f" {name} ".lower()
 
             # --- 1. PRIORITY OVERRIDES (Intercepts tricky items before standard rules) ---
+            
+            # Catch Churu before "Tuna" or "Salmon" triggers Seafood!
+            if 'churu' in text:
+                return 'Pet'
+                
+            # Catch Charcuterie and specific Deli brands before Fresh Meat grabs them!
+            if any(w in text for w in ['charcuterie', 'buddig', 'smithfield', 'columbus', 'foster farms']):
+                return 'Deli'
+
             if any(w in text for w in ['jerky', 'beef stick', 'protein bar', 'snack bar', 'chocolate bar', 'rxbar', 'granola', 'cracker']): 
                 return 'Grocery'
             

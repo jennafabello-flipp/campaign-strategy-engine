@@ -740,12 +740,15 @@ def render_head_to_head_variance():
                 
                 df.columns = df.columns.astype(str).str.strip()
                 
-                # 🚨 THE FIX: Standardize column names automatically
+                # Standardize column names automatically including TTMs
                 rename_map = {
                     'Total Item Views': 'Views',
                     'Item Views': 'Views',
                     'Total Item Clicks': 'Clicks',
-                    'Item Clicks': 'Clicks'
+                    'Item Clicks': 'Clicks',
+                    'Total Transfer to Merchant (TTMs)': 'TTMs',
+                    'Item TTMs': 'TTMs',
+                    'Total TTMs': 'TTMs'
                 }
                 df.rename(columns=rename_map, inplace=True)
                 
@@ -754,39 +757,90 @@ def render_head_to_head_variance():
             df_base = load_data(base_merch_file)
             df_new = load_data(new_merch_file)
 
-            # Standardize 'Page Position' column
+            # ---------------------------------------------------------
+            # 📊 NEW: MACRO YOY SUMMARY TABLE
+            # ---------------------------------------------------------
+            if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+                st.write("---")
+                st.subheader("📈 Macro Item-Level Performance (YoY)")
+
+                # Base Calcs
+                b_views = df_base['Views'].sum()
+                b_clicks = df_base['Clicks'].sum()
+                b_ctr = b_clicks / b_views if b_views > 0 else 0
+                b_ttms = df_base['TTMs'].sum() if 'TTMs' in df_base.columns else 0
+                b_ttmr = b_ttms / b_views if b_views > 0 else 0
+
+                # New Calcs
+                n_views = df_new['Views'].sum()
+                n_clicks = df_new['Clicks'].sum()
+                n_ctr = n_clicks / n_views if n_views > 0 else 0
+                n_ttms = df_new['TTMs'].sum() if 'TTMs' in df_new.columns else 0
+                n_ttmr = n_ttms / n_views if n_views > 0 else 0
+
+                # Variance Calcs
+                def get_yoy(new_val, base_val):
+                    return (new_val - base_val) / base_val if base_val > 0 else 0
+
+                y_views = get_yoy(n_views, b_views)
+                y_clicks = get_yoy(n_clicks, b_clicks)
+                y_ctr = get_yoy(n_ctr, b_ctr)
+                y_ttms = get_yoy(n_ttms, b_ttms)
+                y_ttmr = get_yoy(n_ttmr, b_ttmr)
+
+                # Build the DataFrame
+                summary_data = {
+                    "Metric": ["Historical (Base)", "Current (New)", "YoY Variance"],
+                    "Total Item Views": [f"{b_views:,.0f}", f"{n_views:,.0f}", f"{y_views:+.2%}"],
+                    "Item Clicks": [f"{b_clicks:,.0f}", f"{n_clicks:,.0f}", f"{y_clicks:+.2%}"],
+                    "Item CTR %": [f"{b_ctr:.2%}", f"{n_ctr:.2%}", f"{y_ctr:+.2%}"],
+                    "Item TTMs": [f"{b_ttms:,.0f}", f"{n_ttms:,.0f}", f"{y_ttms:+.2%}"],
+                    "Item TTMR %": [f"{b_ttmr:.2%}", f"{n_ttmr:.2%}", f"{y_ttmr:+.2%}"]
+                }
+                df_summary = pd.DataFrame(summary_data)
+
+                # Custom function to color the +/- percentages
+                def color_yoy_cells(val):
+                    if isinstance(val, str):
+                        if val.startswith('+') and val != '+0.00%':
+                            return 'color: #28a745; font-weight: bold;' # Green
+                        elif val.startswith('-'):
+                            return 'color: #fd7e14; font-weight: bold;' # Orange
+                    return ''
+
+                # Render the stylized table
+                st.dataframe(df_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ Could not generate Macro Summary. Missing Views or Clicks data.")
+
+            # ---------------------------------------------------------
+            # 📘 FRONT COVER PERFORMANCE
+            # ---------------------------------------------------------
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
                 df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
 
-                # Isolate Page 1 Front Cover items
                 df_base_cover = df_base[df_base['Page Position'] == '1'].copy()
                 df_new_cover = df_new[df_new['Page Position'] == '1'].copy()
 
                 st.write("---")
                 st.subheader("📘 Front Cover Performance (Page 1)")
 
-                # Identify product name column (checks for 'Clean_Name' first, then fallback)
                 item_col = 'Clean_Name' if 'Clean_Name' in df_base_cover.columns else 'Merchandise Name'
 
                 if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
-                    
-                    # ⚠️ Added safety check to ensure we only proceed if Views and Clicks successfully mapped
                     if 'Views' in df_base_cover.columns and 'Clicks' in df_base_cover.columns:
                         
-                        # Aggregate Base Cover
                         base_agg = df_base_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                         base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
                         base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
                         base_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
-                        # Aggregate New Cover
                         new_agg = df_new_cover.groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                         new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
                         new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[[item_col, 'Clicks', 'CTR %']]
                         new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
-                        # Render side-by-side comparison tables
                         c1, c2 = st.columns(2)
                         with c1:
                             st.markdown("**Historical Cover (Base)**")
@@ -798,7 +852,6 @@ def render_head_to_head_variance():
                         st.error("Error: Could not locate standard View and Click columns in the raw data.")
                 else:
                     st.error(f"Could not find item column ('{item_col}'). Available columns: {list(df_base_cover.columns)}")
-
             else:
                 st.error("⚠️ The column 'Page Position' was not found in one or both files.")
 

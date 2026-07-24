@@ -689,6 +689,7 @@ def render_single_campaign_matrix():
 def render_head_to_head_variance():
     import pandas as pd
     import numpy as np
+    import io
 
     st.write("---")
     st.header("⚖️ Head-to-Head Campaign Comparison")
@@ -715,64 +716,141 @@ def render_head_to_head_variance():
     # A button to run the comparison once files are dropped in
     if st.button("🚀 Run Head-to-Head Analysis"):
         
+        # Dictionary to store dataframes for the Excel exporter
+        export_sheets = {}
+
+        # Universal Loader
+        def load_generic_data(file):
+            if file.name.endswith('.csv'):
+                preview = pd.read_csv(file, header=None, nrows=15)
+            else:
+                preview = pd.read_excel(file, header=None, nrows=15)
+            
+            header_row = 0
+            for idx, row in preview.iterrows():
+                row_vals = [str(val).strip() for val in row.values]
+                if any(k in row_vals for k in ['Weekly Date', 'Daily Date', 'Flyer Run Name', 'Total Flyer Impressions', 'Page Position']):
+                    header_row = idx
+                    break
+
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file, header=header_row)
+            else:
+                df = pd.read_excel(file, header=header_row)
+            
+            df.columns = df.columns.astype(str).str.strip()
+            return df
+
+        # Helper to extract campaign details (Merchant, Runs, Dates)
+        def get_campaign_info(df):
+            merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
+            runs = ", ".join(df['Flyer Run Name'].dropna().astype(str).unique()) if 'Flyer Run Name' in df.columns else "N/A"
+            
+            date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
+            if date_col and date_col in df.columns:
+                parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+                if len(parsed_dates) > 0:
+                    start_date = parsed_dates.min().strftime('%Y-%m-%d')
+                    end_date = parsed_dates.max().strftime('%Y-%m-%d')
+                    date_str = f"{start_date} to {end_date}"
+                else:
+                    date_str = "N/A"
+            else:
+                date_str = "N/A"
+                
+            return merchant, runs, date_str
+
+        # ---------------------------------------------------------
+        # 📌 CAMPAIGN OVERVIEW HEADER
+        # ---------------------------------------------------------
+        primary_base = base_funnel_file or base_merch_file
+        primary_new = new_funnel_file or new_merch_file
+
+        if primary_base and primary_new:
+            df_info_base = load_generic_data(primary_base)
+            df_info_new = load_generic_data(primary_new)
+
+            m_base, r_base, d_base = get_campaign_info(df_info_base)
+            m_new, r_new, d_new = get_campaign_info(df_info_new)
+
+            st.write("---")
+            st.subheader("📋 Campaign Context & Overview")
+            
+            info_c1, info_c2 = st.columns(2)
+            with info_c1:
+                st.markdown("##### 📜 **Historical (Base) Campaign**")
+                st.markdown(f"* **Merchant:** `{m_base}`")
+                st.markdown(f"* **Flyer Run Name(s):** `{r_base}`")
+                st.markdown(f"* **Active Dates:** `{d_base}`")
+
+            with info_c2:
+                st.markdown("##### 🆕 **Current (New) Campaign**")
+                st.markdown(f"* **Merchant:** `{m_new}`")
+                st.markdown(f"* **Flyer Run Name(s):** `{r_new}`")
+                st.markdown(f"* **Active Dates:** `{d_new}`")
+
         # ---------------------------------------------------------
         # 📊 1. FUNNEL PROCESSING (TOP OF DASHBOARD)
         # ---------------------------------------------------------
         if base_funnel_file and new_funnel_file:
             st.success("Both Funnel files loaded! Calculating Macro Funnel Performance...")
 
-            def load_funnel_data(file):
-                if file.name.endswith('.csv'):
-                    preview = pd.read_csv(file, header=None, nrows=15)
+            f_base = load_generic_data(base_funnel_file)
+            f_new = load_generic_data(new_funnel_file)
+
+            # Auto-filter by Flyer Run Name if multiple runs exist in the export file
+            base_runs = f_base['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_base.columns else []
+            new_runs = f_new['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_new.columns else []
+
+            if len(new_runs) > 1 and len(base_runs) == 1:
+                target_run = base_runs[0]
+                target_run_2026 = target_run.replace('2025', '2026')
+                if target_run_2026 in new_runs:
+                    f_new = f_new[f_new['Flyer Run Name'] == target_run_2026].copy()
+                elif target_run in new_runs:
+                    f_new = f_new[f_new['Flyer Run Name'] == target_run].copy()
                 else:
-                    preview = pd.read_excel(file, header=None, nrows=15)
+                    golive_runs = [r for r in new_runs if 'Go-Live' in str(r) or 'May' in str(r)]
+                    if golive_runs:
+                        f_new = f_new[f_new['Flyer Run Name'] == golive_runs[0]].copy()
+
+            def extract_funnel_metrics_by_name(df):
+                def safe_sum(col_names):
+                    for col in col_names:
+                        if col in df.columns:
+                            return pd.to_numeric(df[col], errors='coerce').sum()
+                    return 0
+
+                impressions = safe_sum(['Total Flyer Impressions', 'Impressions'])
+                opens = safe_sum(['Total Opens', 'Flyer Opens'])
+                uevs = safe_sum(['Total Unique Engaged Visits (UEVs)', 'Unique Engagements'])
+                clicks = safe_sum(['Total Item Clicks', 'Total Flyer Clicks', 'Item Clicks'])
+                ttms = safe_sum(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Site', 'TTMs'])
+                adds = safe_sum(['Total Clippings', 'Total Shopping List Adds', 'Clippings'])
                 
-                header_row = 0
-                for idx, row in preview.iterrows():
-                    row_vals = [str(val).strip() for val in row.values]
-                    if 'Weekly Date' in row_vals or 'Flyer Run Name' in row_vals or 'Impressions' in row_vals:
-                        header_row = idx
-                        break
+                tot_time_sec = safe_sum(['Total Time On Flyer (Sec)', 'Total Time Spent (Sec)'])
+                tot_sessions = safe_sum(['Total Flyer Sessions', 'Flyer Sessions'])
 
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, header=header_row)
-                else:
-                    df = pd.read_excel(file, header=header_row)
-                return df
-
-            f_base = load_funnel_data(base_funnel_file)
-            f_new = load_funnel_data(new_funnel_file)
-
-            # Helper to extract metrics based strictly on column letter/index
-            def extract_funnel_metrics(df):
-                def get_sum(col_idx):
-                    return pd.to_numeric(df.iloc[:, col_idx], errors='coerce').sum() if col_idx < len(df.columns) else 0
-
-                tot_time_sec = get_sum(24)     # Col Y (Time Spent in Seconds)
-                tot_sessions = get_sum(20)     # Col U (Flyer Sessions)
-                
-                # Formula: (Time on flyer / Flyer sessions) = Avg Seconds per session
                 avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
 
-                # Clean 'sec' vs 'min' string formatting
                 if avg_time_sec >= 60:
                     formatted_time = f"{(avg_time_sec / 60):.2f} min"
                 else:
                     formatted_time = f"{avg_time_sec:.1f} sec"
 
                 return {
-                    "Impressions": get_sum(13),             # Col N
-                    "Flyer Opens": get_sum(15),             # Col P
-                    "Unique Engagements": get_sum(17),      # Col R
-                    "Total Flyer Clicks": get_sum(19),      # Col T
-                    "Total Transfer to Site": get_sum(23),  # Col X
-                    "Raw Avg Time Sec": avg_time_sec,       # Raw for YoY math
-                    "Formatted Time": formatted_time,       # Clean display string
-                    "Total Shopping List Adds": get_sum(26) # Col AA
+                    "Impressions": impressions,
+                    "Flyer Opens": opens,
+                    "Unique Engagements": uevs,
+                    "Total Flyer Clicks": clicks,
+                    "Total Transfer to Site": ttms,
+                    "Raw Avg Time Sec": avg_time_sec,
+                    "Formatted Time": formatted_time,
+                    "Total Shopping List Adds": adds
                 }
 
-            b_metrics = extract_funnel_metrics(f_base)
-            n_metrics = extract_funnel_metrics(f_new)
+            b_metrics = extract_funnel_metrics_by_name(f_base)
+            n_metrics = extract_funnel_metrics_by_name(f_new)
 
             def get_funnel_yoy(new_val, base_val):
                 return (new_val - base_val) / base_val if base_val > 0 else 0
@@ -792,6 +870,7 @@ def render_head_to_head_variance():
             }
             
             df_funnel_summary = pd.DataFrame(funnel_data)
+            export_sheets["Funnel_Macro_YoY"] = df_funnel_summary
 
             def color_yoy_cells(val):
                 if isinstance(val, str):
@@ -811,25 +890,7 @@ def render_head_to_head_variance():
             st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
 
             def load_merch_data(file):
-                if file.name.endswith('.csv'):
-                    preview = pd.read_csv(file, header=None, nrows=15)
-                else:
-                    preview = pd.read_excel(file, header=None, nrows=15)
-                
-                header_row = 0
-                for idx, row in preview.iterrows():
-                    row_vals = [str(val).strip() for val in row.values]
-                    if 'Weekly Date' in row_vals or 'Flyer Run Name' in row_vals or 'Page Position' in row_vals:
-                        header_row = idx
-                        break
-
-                if file.name.endswith('.csv'):
-                    df = pd.read_csv(file, header=header_row)
-                else:
-                    df = pd.read_excel(file, header=header_row)
-                
-                df.columns = df.columns.astype(str).str.strip()
-                
+                df = load_generic_data(file)
                 rename_map = {
                     'Total Item Views': 'Views',
                     'Item Views': 'Views',
@@ -853,7 +914,7 @@ def render_head_to_head_variance():
                 if 'Page Position' in df.columns: cols.append('Page Position')
                 return cols
 
-            # --- MACRO YOY SUMMARY TABLE (Uses ALL data, including assets) ---
+            # --- MACRO YOY SUMMARY TABLE ---
             if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
                 st.subheader("📈 Macro Item-Level Performance (YoY)")
@@ -888,6 +949,7 @@ def render_head_to_head_variance():
                     "Item TTMR %": [f"{b_ttmr:.2%}", f"{n_ttmr:.2%}", f"{y_ttmr:+.2%}"]
                 }
                 df_summary = pd.DataFrame(summary_data)
+                export_sheets["Merch_Macro_YoY"] = df_summary
 
                 def color_yoy_cells(val):
                     if isinstance(val, str):
@@ -925,6 +987,9 @@ def render_head_to_head_variance():
                         new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
                         new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
                         new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+
+                        export_sheets["Front_Cover_Base"] = base_top
+                        export_sheets["Front_Cover_New"] = new_top
 
                         c1, c2 = st.columns(2)
                         with c1:
@@ -971,6 +1036,9 @@ def render_head_to_head_variance():
                     new_top_ctr = new_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[new_grp + ['Clicks', 'CTR %']]
                     new_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
 
+                    export_sheets["Products_Top_CTR_Base"] = base_top_ctr
+                    export_sheets["Products_Top_CTR_New"] = new_top_ctr
+
                     c3, c4 = st.columns(2)
                     with c3:
                         st.markdown("**Historical Top CTR (Base)**")
@@ -988,6 +1056,9 @@ def render_head_to_head_variance():
                     
                     new_top_clicks = new_all_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
                     new_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+
+                    export_sheets["Products_Top_Clicks_Base"] = base_top_clicks
+                    export_sheets["Products_Top_Clicks_New"] = new_top_clicks
 
                     c5, c6 = st.columns(2)
                     with c5:
@@ -1032,6 +1103,9 @@ def render_head_to_head_variance():
                         new_top_asset_ctr = new_asset_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[new_grp + ['Clicks', 'CTR %']]
                         new_top_asset_ctr.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
+                        export_sheets["Assets_Top_CTR_Base"] = base_top_asset_ctr
+                        export_sheets["Assets_Top_CTR_New"] = new_top_asset_ctr
+
                         c7, c8 = st.columns(2)
                         with c7:
                             st.markdown("**Historical Top Assets (Base)**")
@@ -1050,6 +1124,9 @@ def render_head_to_head_variance():
                         new_top_asset_clicks = new_asset_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
                         new_top_asset_clicks.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
+                        export_sheets["Assets_Top_Clicks_Base"] = base_top_asset_clicks
+                        export_sheets["Assets_Top_Clicks_New"] = new_top_asset_clicks
+
                         c9, c10 = st.columns(2)
                         with c9:
                             st.markdown("**Historical Top Clicks (Base)**")
@@ -1059,7 +1136,28 @@ def render_head_to_head_variance():
                             st.dataframe(new_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
-        # ⚠️ 3. WARNING LOGIC
+        # 📥 GLOBAL EXCEL DOWNLOAD BUTTON
+        # ---------------------------------------------------------
+        if export_sheets:
+            st.write("---")
+            st.subheader("📥 Export Complete Campaign Analysis")
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                for sheet_name, df_sheet in export_sheets.items():
+                    df_sheet.to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            
+            excel_data = output.getvalue()
+
+            st.download_button(
+                label="💾 Download Full Campaign Head-to-Head Report (.xlsx)",
+                data=excel_data,
+                file_name="Head_to_Head_Campaign_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # ---------------------------------------------------------
+        # ⚠️ WARNING LOGIC
         # ---------------------------------------------------------
         if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):
             st.warning("⚠️ Please upload BOTH Base and New files for either Merchandise or Funnel metrics to run the comparison.")

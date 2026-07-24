@@ -751,8 +751,14 @@ def render_head_to_head_variance():
                 tot_time_sec = get_sum(24)     # Col Y (Time Spent in Seconds)
                 tot_sessions = get_sum(20)     # Col U (Flyer Sessions)
                 
-                # Formula: (Time on flyer / Flyer sessions) / 60 = Avg Minutes Per Session
-                avg_time_mins = (tot_time_sec / tot_sessions / 60) if tot_sessions > 0 else 0
+                # Formula: (Time on flyer / Flyer sessions) = Avg Seconds per session
+                avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
+
+                # Clean 'sec' vs 'min' string formatting
+                if avg_time_sec >= 60:
+                    formatted_time = f"{(avg_time_sec / 60):.2f} min"
+                else:
+                    formatted_time = f"{avg_time_sec:.1f} sec"
 
                 return {
                     "Impressions": get_sum(13),             # Col N
@@ -760,7 +766,8 @@ def render_head_to_head_variance():
                     "Unique Engagements": get_sum(17),      # Col R
                     "Total Flyer Clicks": get_sum(19),      # Col T
                     "Total Transfer to Site": get_sum(23),  # Col X
-                    "Avg Time Spent Mins": avg_time_mins,   # Calculated Mins per Session
+                    "Raw Avg Time Sec": avg_time_sec,       # Raw for YoY math
+                    "Formatted Time": formatted_time,       # Clean display string
                     "Total Shopping List Adds": get_sum(26) # Col AA
                 }
 
@@ -781,7 +788,7 @@ def render_head_to_head_variance():
                 "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
                 "Transfer to Site": [f"{b_metrics['Total Transfer to Site']:,.0f}", f"{n_metrics['Total Transfer to Site']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Transfer to Site'], b_metrics['Total Transfer to Site']):+.2%}"],
                 "Shopping List Adds": [f"{b_metrics['Total Shopping List Adds']:,.0f}", f"{n_metrics['Total Shopping List Adds']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Shopping List Adds'], b_metrics['Total Shopping List Adds']):+.2%}"],
-                "Avg Time Spent": [f"{b_metrics['Avg Time Spent Mins']:.2f} mins", f"{n_metrics['Avg Time Spent Mins']:.2f} mins", f"{get_funnel_yoy(n_metrics['Avg Time Spent Mins'], b_metrics['Avg Time Spent Mins']):+.2%}"]
+                "Avg Time Spent": [b_metrics['Formatted Time'], n_metrics['Formatted Time'], f"{get_funnel_yoy(n_metrics['Raw Avg Time Sec'], b_metrics['Raw Avg Time Sec']):+.2%}"]
             }
             
             df_funnel_summary = pd.DataFrame(funnel_data)

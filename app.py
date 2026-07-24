@@ -759,7 +759,6 @@ def render_head_to_head_variance():
             return merchant, runs, date_str
 
         # 🔍 CATEGORY RESOLUTION FALLBACK SEQUENCE
-        # Custom ID -> Retailer Category -> Google Category
         def resolve_category_column(df):
             tier1_cols = ['Custom ID', 'Custom Category', 'Custom_ID', 'Internal Category']
             tier2_cols = ['Retailer Category', 'Category', 'Category Name', 'Department', 'Dept Name', 'Sub-Category', 'Merchandise Category']
@@ -798,6 +797,26 @@ def render_head_to_head_variance():
                 st.markdown(f"* **Merchant:** `{m_new}`")
                 st.markdown(f"* **Flyer Run Name(s):** `{r_new}`")
                 st.markdown(f"* **Active Dates:** `{d_new}`")
+
+        # ---------------------------------------------------------
+        # 📖 PERFORMANCE RATES GLOSSARY
+        # ---------------------------------------------------------
+        st.write("---")
+        with st.expander("📖 **Performance Rates & Metrics Glossary (Click to Expand)**"):
+            st.markdown("""
+            * **Open Rate %** = `Flyer Opens ÷ Impressions`  
+              *Measures the percentage of ad impressions that resulted in a user opening the digital flyer.*
+            * **Engagement Rate %** = `Unique Engaged Visits ÷ Flyer Opens`  
+              *Measures the percentage of flyer opens where users actively interacted with the content.*
+            * **Click-To-Open Rate (CTOR %)** = `Total Item Clicks ÷ Flyer Opens`  
+              *Measures content effectiveness by tracking the volume of product/banner clicks generated per open.*
+            * **Intent-to-Buy Rate %** = `Shopping List Adds ÷ Unique Engagements`  
+              *Measures buyer intent by tracking how many engaged shoppers clipped items to their list.*
+            * **Item CTR %** = `Item Clicks ÷ Item Views`  
+              *Measures individual product performance based on click likelihood relative to views.*
+            * **Transfer-to-Merchant Rate (TTMR %)** = `Item TTMs ÷ Item Views`  
+              *Measures e-commerce referral drive by tracking direct outbound transfers per view.*
+            """)
 
         # ---------------------------------------------------------
         # 📊 1. FUNNEL PROCESSING & CONVERSION RATIOS
@@ -874,7 +893,6 @@ def render_head_to_head_variance():
             def get_funnel_yoy(new_val, base_val):
                 return (new_val - base_val) / base_val if base_val > 0 else 0
 
-            st.write("---")
             st.subheader("🚀 Top-of-Funnel Macro Performance (YoY)")
             
             funnel_data = {
@@ -1003,7 +1021,6 @@ def render_head_to_head_variance():
 
                 merged_page = pd.merge(base_page_agg, new_page_agg, on='Page Position', how='outer').fillna(0)
                 
-                # Sort numerically by Page Number
                 merged_page['Page_Num'] = pd.to_numeric(merged_page['Page Position'], errors='coerce')
                 merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
 
@@ -1081,7 +1098,6 @@ def render_head_to_head_variance():
                 mc2.metric("🆕 New Item Additions", f"{len(added_items):,}")
                 mc3.metric("❌ Dropped Items", f"{len(dropped_items):,}")
 
-                # Repeat Items YoY CTR Performance
                 if len(repeat_items) > 0:
                     df_base_rep = df_base[df_base[item_col].isin(repeat_items)].groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     df_base_rep['Base CTR %'] = np.where(df_base_rep['Views'] > 0, df_base_rep['Clicks'] / df_base_rep['Views'], 0)

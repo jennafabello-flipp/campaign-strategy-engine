@@ -1136,24 +1136,24 @@ def render_head_to_head_variance():
                             st.dataframe(new_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
-        # 📥 GLOBAL EXCEL DOWNLOAD BUTTON
+        # 📥 GLOBAL EXCEL DOWNLOAD BUTTON (STYLING MATCHES MODULES 1 & 4)
         # ---------------------------------------------------------
         if export_sheets:
             st.write("---")
-            st.subheader("📥 Export Complete Campaign Analysis")
             
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 for sheet_name, df_sheet in export_sheets.items():
                     df_sheet.to_excel(writer, sheet_name=sheet_name[:31], index=False)
             
             excel_data = output.getvalue()
 
             st.download_button(
-                label="💾 Download Full Campaign Head-to-Head Report (.xlsx)",
+                label="📥 Download Campaign Analysis (.xlsx)",
                 data=excel_data,
                 file_name="Head_to_Head_Campaign_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
             )
 
         # ---------------------------------------------------------

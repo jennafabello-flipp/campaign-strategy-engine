@@ -716,7 +716,6 @@ def render_head_to_head_variance():
     # A button to run the comparison once files are dropped in
     if st.button("🚀 Run Head-to-Head Analysis"):
         
-        # Dictionary to store dataframes for the Excel exporter
         export_sheets = {}
 
         # Universal Loader
@@ -741,7 +740,6 @@ def render_head_to_head_variance():
             df.columns = df.columns.astype(str).str.strip()
             return df
 
-        # Helper to extract campaign details (Merchant, Runs, Dates)
         def get_campaign_info(df):
             merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
             runs = ", ".join(df['Flyer Run Name'].dropna().astype(str).unique()) if 'Flyer Run Name' in df.columns else "N/A"
@@ -759,6 +757,18 @@ def render_head_to_head_variance():
                 date_str = "N/A"
                 
             return merchant, runs, date_str
+
+        # 🔍 CATEGORY RESOLUTION FALLBACK SEQUENCE
+        # Custom ID -> Retailer Category -> Google Category
+        def resolve_category_column(df):
+            tier1_cols = ['Custom ID', 'Custom Category', 'Custom_ID', 'Internal Category']
+            tier2_cols = ['Retailer Category', 'Category', 'Category Name', 'Department', 'Dept Name', 'Sub-Category', 'Merchandise Category']
+            tier3_cols = ['Google Category', 'Google Product Category', 'Google_Category', 'L1 Category', 'L2 Category']
+
+            for col in tier1_cols + tier2_cols + tier3_cols:
+                if col in df.columns:
+                    return col
+            return None
 
         # ---------------------------------------------------------
         # 📌 CAMPAIGN OVERVIEW HEADER
@@ -790,7 +800,7 @@ def render_head_to_head_variance():
                 st.markdown(f"* **Active Dates:** `{d_new}`")
 
         # ---------------------------------------------------------
-        # 📊 1. FUNNEL PROCESSING (TOP OF DASHBOARD)
+        # 📊 1. FUNNEL PROCESSING & CONVERSION RATIOS
         # ---------------------------------------------------------
         if base_funnel_file and new_funnel_file:
             st.success("Both Funnel files loaded! Calculating Macro Funnel Performance...")
@@ -798,7 +808,6 @@ def render_head_to_head_variance():
             f_base = load_generic_data(base_funnel_file)
             f_new = load_generic_data(new_funnel_file)
 
-            # Auto-filter by Flyer Run Name if multiple runs exist in the export file
             base_runs = f_base['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_base.columns else []
             new_runs = f_new['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_new.columns else []
 
@@ -833,6 +842,12 @@ def render_head_to_head_variance():
 
                 avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
 
+                # Conversion Ratios
+                open_rate = (opens / impressions) if impressions > 0 else 0
+                eng_rate = (uevs / opens) if opens > 0 else 0
+                ctor = (clicks / opens) if opens > 0 else 0
+                intent_rate = (adds / uevs) if uevs > 0 else 0
+
                 if avg_time_sec >= 60:
                     formatted_time = f"{(avg_time_sec / 60):.2f} min"
                 else:
@@ -841,12 +856,16 @@ def render_head_to_head_variance():
                 return {
                     "Impressions": impressions,
                     "Flyer Opens": opens,
+                    "Open Rate %": open_rate,
                     "Unique Engagements": uevs,
+                    "Engagement Rate %": eng_rate,
                     "Total Flyer Clicks": clicks,
-                    "Total Transfer to Site": ttms,
+                    "CTOR %": ctor,
+                    "Transfer to Site": ttms,
+                    "Shopping List Adds": adds,
+                    "Intent Rate %": intent_rate,
                     "Raw Avg Time Sec": avg_time_sec,
-                    "Formatted Time": formatted_time,
-                    "Total Shopping List Adds": adds
+                    "Formatted Time": formatted_time
                 }
 
             b_metrics = extract_funnel_metrics_by_name(f_base)
@@ -862,10 +881,14 @@ def render_head_to_head_variance():
                 "Metric": ["Historical (Base)", "Current (New)", "YoY Variance"],
                 "Impressions": [f"{b_metrics['Impressions']:,.0f}", f"{n_metrics['Impressions']:,.0f}", f"{get_funnel_yoy(n_metrics['Impressions'], b_metrics['Impressions']):+.2%}"],
                 "Flyer Opens": [f"{b_metrics['Flyer Opens']:,.0f}", f"{n_metrics['Flyer Opens']:,.0f}", f"{get_funnel_yoy(n_metrics['Flyer Opens'], b_metrics['Flyer Opens']):+.2%}"],
+                "Open Rate %": [f"{b_metrics['Open Rate %']:.2%}", f"{n_metrics['Open Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Open Rate %'], b_metrics['Open Rate %']):+.2%}"],
                 "Unique Engagements": [f"{b_metrics['Unique Engagements']:,.0f}", f"{n_metrics['Unique Engagements']:,.0f}", f"{get_funnel_yoy(n_metrics['Unique Engagements'], b_metrics['Unique Engagements']):+.2%}"],
+                "Engagement Rate %": [f"{b_metrics['Engagement Rate %']:.2%}", f"{n_metrics['Engagement Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Engagement Rate %'], b_metrics['Engagement Rate %']):+.2%}"],
                 "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
-                "Transfer to Site": [f"{b_metrics['Total Transfer to Site']:,.0f}", f"{n_metrics['Total Transfer to Site']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Transfer to Site'], b_metrics['Total Transfer to Site']):+.2%}"],
-                "Shopping List Adds": [f"{b_metrics['Total Shopping List Adds']:,.0f}", f"{n_metrics['Total Shopping List Adds']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Shopping List Adds'], b_metrics['Total Shopping List Adds']):+.2%}"],
+                "CTOR %": [f"{b_metrics['CTOR %']:.2%}", f"{n_metrics['CTOR %']:.2%}", f"{get_funnel_yoy(n_metrics['CTOR %'], b_metrics['CTOR %']):+.2%}"],
+                "Transfer to Site": [f"{b_metrics['Transfer to Site']:,.0f}", f"{n_metrics['Transfer to Site']:,.0f}", f"{get_funnel_yoy(n_metrics['Transfer to Site'], b_metrics['Transfer to Site']):+.2%}"],
+                "Shopping List Adds": [f"{b_metrics['Shopping List Adds']:,.0f}", f"{n_metrics['Shopping List Adds']:,.0f}", f"{get_funnel_yoy(n_metrics['Shopping List Adds'], b_metrics['Shopping List Adds']):+.2%}"],
+                "Intent Rate %": [f"{b_metrics['Intent Rate %']:.2%}", f"{n_metrics['Intent Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Intent Rate %'], b_metrics['Intent Rate %']):+.2%}"],
                 "Avg Time Spent": [b_metrics['Formatted Time'], n_metrics['Formatted Time'], f"{get_funnel_yoy(n_metrics['Raw Avg Time Sec'], b_metrics['Raw Avg Time Sec']):+.2%}"]
             }
             
@@ -881,7 +904,6 @@ def render_head_to_head_variance():
                 return ''
 
             st.dataframe(df_funnel_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
-
 
         # ---------------------------------------------------------
         # 🛒 2. MERCHANDISE PROCESSING (BELOW FUNNEL)
@@ -961,11 +983,134 @@ def render_head_to_head_variance():
 
                 st.dataframe(df_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
 
-            # --- FRONT COVER PERFORMANCE ---
+            # ---------------------------------------------------------
+            # 📖 PAGE-BY-PAGE HEATMAP & DROP-OFF ANALYSIS
+            # ---------------------------------------------------------
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
+                st.write("---")
+                st.subheader("📖 Page-by-Page Engagement & Decay Analysis")
+                
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
                 df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
 
+                base_page_agg = df_base.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                base_page_agg['CTR %'] = np.where(base_page_agg['Views'] > 0, base_page_agg['Clicks'] / base_page_agg['Views'], 0)
+                base_page_agg.rename(columns={'Views': 'Base Views', 'Clicks': 'Base Clicks', 'CTR %': 'Base CTR %'}, inplace=True)
+
+                new_page_agg = df_new.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                new_page_agg['CTR %'] = np.where(new_page_agg['Views'] > 0, new_page_agg['Clicks'] / new_page_agg['Views'], 0)
+                new_page_agg.rename(columns={'Views': 'New Views', 'Clicks': 'New Clicks', 'CTR %': 'New CTR %'}, inplace=True)
+
+                merged_page = pd.merge(base_page_agg, new_page_agg, on='Page Position', how='outer').fillna(0)
+                
+                # Sort numerically by Page Number
+                merged_page['Page_Num'] = pd.to_numeric(merged_page['Page Position'], errors='coerce')
+                merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
+
+                export_sheets["Page_Decay_Analysis"] = merged_page
+
+                st.dataframe(
+                    merged_page.style.format({
+                        'Base Views': '{:,.0f}', 'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}',
+                        'New Views': '{:,.0f}', 'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # ---------------------------------------------------------
+            # 🏷️ CATEGORY PERFORMANCE VARIANCE
+            # ---------------------------------------------------------
+            cat_col_base = resolve_category_column(df_base)
+            cat_col_new = resolve_category_column(df_new)
+
+            if cat_col_base and cat_col_new:
+                st.write("---")
+                st.subheader(f"🏷️ Category Performance Variance (via `{cat_col_base}`)")
+
+                df_base[cat_col_base] = df_base[cat_col_base].fillna("Uncategorized").astype(str).str.strip()
+                df_new[cat_col_new] = df_new[cat_col_new].fillna("Uncategorized").astype(str).str.strip()
+
+                base_cat_agg = df_base.groupby(cat_col_base).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                base_cat_agg['Base CTR %'] = np.where(base_cat_agg['Views'] > 0, base_cat_agg['Clicks'] / base_cat_agg['Views'], 0)
+                tot_b_clicks = base_cat_agg['Clicks'].sum()
+                base_cat_agg['Base Click Share %'] = base_cat_agg['Clicks'] / tot_b_clicks if tot_b_clicks > 0 else 0
+                base_cat_agg.rename(columns={cat_col_base: 'Category', 'Clicks': 'Base Clicks'}, inplace=True)
+
+                new_cat_agg = df_new.groupby(cat_col_new).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                new_cat_agg['New CTR %'] = np.where(new_cat_agg['Views'] > 0, new_cat_agg['Clicks'] / new_cat_agg['Views'], 0)
+                tot_n_clicks = new_cat_agg['Clicks'].sum()
+                new_cat_agg['New Click Share %'] = new_cat_agg['Clicks'] / tot_n_clicks if tot_n_clicks > 0 else 0
+                new_cat_agg.rename(columns={cat_col_new: 'Category', 'Clicks': 'New Clicks'}, inplace=True)
+
+                cat_merged = pd.merge(base_cat_agg[['Category', 'Base Clicks', 'Base CTR %', 'Base Click Share %']],
+                                      new_cat_agg[['Category', 'New Clicks', 'New CTR %', 'New Click Share %']],
+                                      on='Category', how='outer').fillna(0)
+
+                cat_merged['Click Share YoY Shift'] = cat_merged['New Click Share %'] - cat_merged['Base Click Share %']
+                cat_merged = cat_merged.sort_values(by='New Clicks', ascending=False)
+
+                export_sheets["Category_Performance_YoY"] = cat_merged
+
+                st.dataframe(
+                    cat_merged.style.format({
+                        'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}', 'Base Click Share %': '{:.2%}',
+                        'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}', 'New Click Share %': '{:.2%}',
+                        'Click Share YoY Shift': '{:+.2%}'
+                    }),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # ---------------------------------------------------------
+            # 🔀 MERCHANDISING MOVEMENT ANALYSIS (Repeat vs New vs Dropped)
+            # ---------------------------------------------------------
+            if item_col in df_base.columns and item_col in df_new.columns:
+                st.write("---")
+                st.subheader("🔀 Merchandising Assortment Movement Analysis")
+
+                base_items_set = set(df_base[item_col].dropna().unique())
+                new_items_set = set(df_new[item_col].dropna().unique())
+
+                repeat_items = base_items_set.intersection(new_items_set)
+                added_items = new_items_set - base_items_set
+                dropped_items = base_items_set - new_items_set
+
+                mc1, mc2, mc3 = st.columns(3)
+                mc1.metric("🔄 Repeat Featured Items", f"{len(repeat_items):,}")
+                mc2.metric("🆕 New Item Additions", f"{len(added_items):,}")
+                mc3.metric("❌ Dropped Items", f"{len(dropped_items):,}")
+
+                # Repeat Items YoY CTR Performance
+                if len(repeat_items) > 0:
+                    df_base_rep = df_base[df_base[item_col].isin(repeat_items)].groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    df_base_rep['Base CTR %'] = np.where(df_base_rep['Views'] > 0, df_base_rep['Clicks'] / df_base_rep['Views'], 0)
+
+                    df_new_rep = df_new[df_new[item_col].isin(repeat_items)].groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    df_new_rep['New CTR %'] = np.where(df_new_rep['Views'] > 0, df_new_rep['Clicks'] / df_new_rep['Views'], 0)
+
+                    rep_merged = pd.merge(df_base_rep[[item_col, 'Clicks', 'Base CTR %']],
+                                          df_new_rep[[item_col, 'Clicks', 'New CTR %']],
+                                          on=item_col, suffixes=(' Base', ' New'))
+                    
+                    rep_merged['CTR % YoY Variance'] = np.where(rep_merged['Base CTR %'] > 0, (rep_merged['New CTR %'] - rep_merged['Base CTR %']) / rep_merged['Base CTR %'], 0)
+                    rep_merged = rep_merged.sort_values(by='Clicks New', ascending=False).head(10)
+                    
+                    export_sheets["Repeat_Items_YoY"] = rep_merged
+
+                    st.markdown("**Top Repeat Items Performance YoY**")
+                    st.dataframe(
+                        rep_merged.style.format({
+                            'Clicks Base': '{:,.0f}', 'Base CTR %': '{:.2%}',
+                            'Clicks New': '{:,.0f}', 'New CTR %': '{:.2%}',
+                            'CTR % YoY Variance': '{:+.2%}'
+                        }),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+            # --- FRONT COVER PERFORMANCE ---
+            if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 df_base_cover = df_base[df_base['Page Position'] == '1'].copy()
                 df_new_cover = df_new[df_new['Page Position'] == '1'].copy()
 
@@ -1136,7 +1281,7 @@ def render_head_to_head_variance():
                             st.dataframe(new_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
-        # 📥 GLOBAL EXCEL DOWNLOAD BUTTON (STYLING MATCHES MODULES 1 & 4)
+        # 📥 GLOBAL EXCEL DOWNLOAD BUTTON
         # ---------------------------------------------------------
         if export_sheets:
             st.write("---")

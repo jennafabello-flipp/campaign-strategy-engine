@@ -314,6 +314,12 @@ def render_insight_box(what, so_what, now_what):
 # 🗂️ MODULE 1: SINGLE CAMPAIGN BREAKDOWN
 # ==============================================================================
 def render_single_campaign_matrix():
+    import pandas as pd
+    import numpy as np
+    import io
+    import plotly.express as px
+    import streamlit as st
+
     st.markdown("<div class='main-header'>Single Campaign Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to map campaign performance. Files can be processed together or independently.</div>", unsafe_allow_html=True)
     
@@ -331,6 +337,45 @@ def render_single_campaign_matrix():
     df_sc_table = pd.DataFrame()
     weekly_scroll = pd.DataFrame()
     qbr_insights = None
+    
+    src_l1 = src_l2 = src_l3 = "N/A"
+
+    # ---------------------------------------------------------
+    # 🔍 HIERARCHICAL TAXONOMY RESOLUTION FUNCTION
+    # Tier 1 (Custom IDs) -> Tier 2 (Retailer) -> Tier 3 (Google L1/L2/L3)
+    # ---------------------------------------------------------
+    def resolve_taxonomy_column_by_level(df, level):
+        if level == 1:
+            tier1 = ['Custom ID 1', 'Custom ID', 'Custom Category L1', 'Custom_ID_1']
+            tier2 = ['Retailer Category L1', 'Retailer Category', 'Category L1', 'Department L1', 'Dept L1']
+            tier3 = ['Google Category L1', 'L1_Category', 'Google Category']
+        elif level == 2:
+            tier1 = ['Custom ID 2', 'Custom Category L2', 'Custom_ID_2']
+            tier2 = ['Retailer Category L2', 'Retailer Subcategory', 'Category L2', 'Department L2', 'Dept L2']
+            tier3 = ['Google Category L2', 'L2_Category', 'Google Category.1']
+        elif level == 3:
+            tier1 = ['Custom ID 3', 'Custom Category L3', 'Custom_ID_3']
+            tier2 = ['Retailer Category L3', 'Retailer Sub-subcategory', 'Category L3', 'Department L3', 'Dept L3']
+            tier3 = ['Google Category L3', 'L3_Category', 'Google Category.2']
+        else:
+            return None, "N/A"
+
+        # Check Tier 1 (Custom IDs)
+        for col in tier1:
+            if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
+                return col, 'Custom ID'
+
+        # Check Tier 2 (Retailer Category)
+        for col in tier2:
+            if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
+                return col, 'Retailer Category'
+
+        # Check Tier 3 (Google Category)
+        for col in tier3:
+            if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
+                return col, 'Google Category'
+
+        return None, "N/A"
 
     if merch_file:
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
@@ -341,13 +386,31 @@ def render_single_campaign_matrix():
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
             
+            # Resolve Category Columns per Tier Hierarchy
+            col_l1, src_l1 = resolve_taxonomy_column_by_level(df_prod, level=1)
+            col_l2, src_l2 = resolve_taxonomy_column_by_level(df_prod, level=2)
+            col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
+
             def build_cat_agg(cat_col):
-                c_agg = df_prod.groupby(cat_col).agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                if not cat_col or cat_col not in df_prod.columns:
+                    return pd.DataFrame()
+                
+                df_temp = df_prod.copy()
+                df_temp[cat_col] = df_temp[cat_col].fillna("Uncategorized").astype(str).str.strip()
+                # Clean breadcrumb strings if present (e.g. 'Outdoor & Garden > Lawn Care' -> 'Outdoor & Garden')
+                df_temp[cat_col] = df_temp[cat_col].apply(lambda x: x.split('>')[0].strip() if '>' in x else x)
+
+                c_agg = df_temp.groupby(cat_col).agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                c_agg.rename(columns={cat_col: 'Category Name'}, inplace=True)
+                
                 c_agg['Item Allocation'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
                 c_agg['Item Click'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
                 c_agg['Add to List'] = c_agg['Clips'] / c_agg['Clips'].sum() if c_agg['Clips'].sum() > 0 else 0
                 return c_agg
-            cat_l1_agg, cat_l2_agg, cat_l3_agg = build_cat_agg('L1_Category'), build_cat_agg('L2_Category'), build_cat_agg('L3_Category')
+
+            cat_l1_agg = build_cat_agg(col_l1)
+            cat_l2_agg = build_cat_agg(col_l2)
+            cat_l3_agg = build_cat_agg(col_l3)
             
             brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
             brand_agg['Click Share %'] = brand_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
@@ -367,14 +430,12 @@ def render_single_campaign_matrix():
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
             
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-            # 🚨 UPDATED DENOMINATOR: Now divides by the sum of the actual items in the tiers, just like Excel
             p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0
             p_agg['List Share %'] = p_agg['Clips'] / p_agg['Clips'].sum() if p_agg['Clips'].sum() > 0 else 0
             p_agg['TTM Share %'] = p_agg['TTMs'] / p_agg['TTMs'].sum() if p_agg['TTMs'].sum() > 0 else 0
             p_agg = p_agg[p_agg['Items'] > 0]
 
             d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-            # 🚨 UPDATED DENOMINATOR: Now divides by the sum of the actual items in the tiers
             d_agg['Click Share %'] = d_agg['Clicks'] / d_agg['Clicks'].sum() if d_agg['Clicks'].sum() > 0 else 0
             d_agg['List Share %'] = d_agg['Clips'] / d_agg['Clips'].sum() if d_agg['Clips'].sum() > 0 else 0
             d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
@@ -392,9 +453,9 @@ def render_single_campaign_matrix():
         wrote_any = False
         if not pivot_top.empty:
             pivot_top.sort_values(by='Item CTR', ascending=False).head(50).to_excel(writer, sheet_name='Top Items', index=False)
-            cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
-            cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
-            cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
+            if not cat_l1_agg.empty: cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
+            if not cat_l2_agg.empty: cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
+            if not cat_l3_agg.empty: cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
             brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
             if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
             p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
@@ -422,8 +483,9 @@ def render_single_campaign_matrix():
     if merch_file and df_clean is not None:
         st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
         
-        cat_clicks = df_prod.groupby('L1_Category')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
-        top_cat = cat_clicks.idxmax() if not cat_clicks.empty else "General Merchandise"
+        top_cat = "General Merchandise"
+        if not cat_l1_agg.empty and 'Clicks' in cat_l1_agg.columns:
+            top_cat = cat_l1_agg.sort_values(by='Clicks', ascending=False).iloc[0]['Category Name']
 
         brand_clicks = df_prod.groupby('Brand')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
         top_brand = brand_clicks.idxmax() if not brand_clicks.empty else "UNKNOWN"
@@ -434,7 +496,7 @@ def render_single_campaign_matrix():
             f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 items by CTR and absolute Clicks to identify high-performing assets that can be repurposed in future creative."
         )
         
-        # --- NEW TWO-TIERED SUMMARY DASHBOARD ---
+        # --- TWO-TIERED SUMMARY DASHBOARD ---
         v_tot, cl_tot, cp_tot, t_tot = global_totals['views'], global_totals['clicks'], global_totals['clips'], global_totals['ttms']
         ctr_global_display = f"{cl_tot/v_tot:.2%}" if v_tot > 0 else "0.00%"
         
@@ -474,38 +536,53 @@ def render_single_campaign_matrix():
         st.subheader("📊 Item Allocation vs Click Share")
         tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
         
+        fmt_cat = {'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation': '{:.1%}', 'Item Click': '{:.1%}', 'Add to List': '{:.1%}'}
+
         with tab_l1:
-            col_t1, col_c1 = st.columns(2)
-            l1_sorted = cat_l1_agg.sort_values(by='Item Click', ascending=False)
-            with col_t1: 
-                st.dataframe(l1_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation': '{:.1%}', 'Item Click': '{:.1%}', 'Add to List': '{:.1%}'}), use_container_width=True, hide_index=True)
-            with col_c1: 
-                fig_l1 = px.bar(l1_sorted.melt(id_vars='L1_Category', value_vars=['Item Allocation', 'Item Click']), x='L1_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l1.add_scatter(x=l1_sorted['L1_Category'], y=l1_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l1.update_layout(title=dict(text="Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
-                st.plotly_chart(fig_l1, use_container_width=True)
+            if not cat_l1_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l1}` ({src_l1})")
+                col_t1, col_c1 = st.columns(2)
+                l1_sorted = cat_l1_agg.sort_values(by='Item Click', ascending=False)
+                with col_t1: 
+                    st.dataframe(l1_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c1: 
+                    fig_l1 = px.bar(l1_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l1.add_scatter(x=l1_sorted['Category Name'], y=l1_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l1.update_layout(title=dict(text="Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l1, use_container_width=True)
+            else:
+                st.info("⚠️ No L1 taxonomy column containing data was detected in the file.")
                 
         with tab_l2:
-            col_t2, col_c2 = st.columns(2)
-            l2_sorted = cat_l2_agg.sort_values(by='Item Click', ascending=False)
-            with col_t2: 
-                st.dataframe(l2_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation': '{:.1%}', 'Item Click': '{:.1%}', 'Add to List': '{:.1%}'}), use_container_width=True, hide_index=True)
-            with col_c2: 
-                fig_l2 = px.bar(l2_sorted.melt(id_vars='L2_Category', value_vars=['Item Allocation', 'Item Click']), x='L2_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l2.add_scatter(x=l2_sorted['L2_Category'], y=l2_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l2.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
-                st.plotly_chart(fig_l2, use_container_width=True)
+            if not cat_l2_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l2}` ({src_l2})")
+                col_t2, col_c2 = st.columns(2)
+                l2_sorted = cat_l2_agg.sort_values(by='Item Click', ascending=False)
+                with col_t2: 
+                    st.dataframe(l2_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c2: 
+                    fig_l2 = px.bar(l2_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l2.add_scatter(x=l2_sorted['Category Name'], y=l2_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l2.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l2, use_container_width=True)
+            else:
+                st.info("⚠️ No L2 taxonomy column containing data was detected in the file.")
                 
         with tab_l3:
-            col_t3, col_c3 = st.columns(2)
-            l3_sorted = cat_l3_agg.sort_values(by='Item Click', ascending=False)
-            with col_t3: 
-                st.dataframe(l3_sorted.style.format({'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation': '{:.1%}', 'Item Click': '{:.1%}', 'Add to List': '{:.1%}'}), use_container_width=True, hide_index=True)
-            with col_c3: 
-                fig_l3 = px.bar(l3_sorted.melt(id_vars='L3_Category', value_vars=['Item Allocation', 'Item Click']), x='L3_Category', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
-                fig_l3.add_scatter(x=l3_sorted['L3_Category'], y=l3_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
-                fig_l3.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
-                st.plotly_chart(fig_l3, use_container_width=True)
+            if not cat_l3_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l3}` ({src_l3})")
+                col_t3, col_c3 = st.columns(2)
+                l3_sorted = cat_l3_agg.sort_values(by='Item Click', ascending=False)
+                with col_t3: 
+                    st.dataframe(l3_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c3: 
+                    fig_l3 = px.bar(l3_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l3.add_scatter(x=l3_sorted['Category Name'], y=l3_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l3.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l3, use_container_width=True)
+            else:
+                st.info("⚠️ No L3 taxonomy column containing data was detected in the file.")
+
         st.write("---")
         st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
         b_col, c_col = st.columns(2)
@@ -533,11 +610,10 @@ def render_single_campaign_matrix():
             st.markdown("**Discount Band Performance**")
             st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        # --- NEW SIDE-BY-SIDE PRICE BAND GRAPHS ---
+        # --- SIDE-BY-SIDE PRICE BAND GRAPHS ---
         col_pb1, col_pb2 = st.columns(2)
         
         with col_pb1:
-            # Graph 1: Clicks vs Clips
             df_melt_1 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['Click Share %', 'List Share %'])
             df_melt_1['variable'] = df_melt_1['variable'].replace({'Click Share %': 'Clicks to Total', 'List Share %': 'Clips to Total'})
             
@@ -554,7 +630,6 @@ def render_single_campaign_matrix():
             st.plotly_chart(fig_price_1, use_container_width=True)
 
         with col_pb2:
-            # Graph 2: TTMs vs Clips
             df_melt_2 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['TTM Share %', 'List Share %'])
             df_melt_2['variable'] = df_melt_2['variable'].replace({'TTM Share %': 'TTMs to Total', 'List Share %': 'Clips to Total'})
             
@@ -570,7 +645,6 @@ def render_single_campaign_matrix():
             )
             st.plotly_chart(fig_price_2, use_container_width=True)
 
-        # --- STRATEGIC INSIGHT CALLOUT ---
         st.info("""
         💡 **How to Read the Share Graphs:** These charts display the **Proportional Share of Total**, not raw volume. 
         
@@ -636,20 +710,18 @@ def render_single_campaign_matrix():
                 yaxis=dict(tickformat='.0%', range=[0,1])
             )
             st.plotly_chart(fig, use_container_width=True)
-            # --- DYNAMIC STRATEGIC INSIGHT CALLOUT (WITH DIAGNOSTICS) ---
+
         if not df_sc_table.empty:
-            # 1. Find the exact cliff where readership drops below 50%
             cliff_data = df_sc_table[df_sc_table['% of Users Read'] < 0.50]
             
             if not cliff_data.empty:
                 cliff_depth = cliff_data.iloc[0]['Scroll Depth']
                 cliff_ret = cliff_data.iloc[0]['% of Users Read']
                 cliff_pg = cliff_data.iloc[0]['Approx Page']
-                cliff_pg_int = max(1, int(cliff_pg)) # Identify the page right before the drop
+                cliff_pg_int = max(1, int(cliff_pg))
                 
                 cliff_text = f"**The 'Half-Life' Cliff:** Audience retention drops below 50% at the **{cliff_depth}** mark (approx. Page {cliff_pg:.1f}), falling to **{cliff_ret:.1%}**. Your highest-margin items must be placed *before* this point to guarantee visibility."
                 
-                # 2. Diagnostic Engine: Why did they leave?
                 page_prod_clicks = df_prod[df_prod['Page'] == cliff_pg_int]['Clicks'].sum() if not df_prod.empty else 0
                 try:
                     page_creative_clicks = df_creative[df_creative['Page'] == cliff_pg_int]['Clicks'].sum() if not df_creative.empty else 0
@@ -673,7 +745,6 @@ def render_single_campaign_matrix():
                 cliff_text = "**The 'Half-Life' Cliff:** Incredible retention! Your audience stays above 50% engagement throughout the entire flyer, giving you massive visibility across every single page."
                 diagnostic_text = ""
 
-            # 3. Find the final "Loyalist" retention at the very end
             final_ret = df_sc_table.iloc[-1]['% of Users Read']
             
             st.info(f"""

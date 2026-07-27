@@ -340,6 +340,35 @@ def render_single_campaign_matrix():
     
     src_l1 = src_l2 = src_l3 = "N/A"
 
+    # 🌐 BILINGUAL TRANSLATION MAP (FR -> EN)
+    bilingual_map = {
+        'extérieur et jardin': 'Outdoor & Garden',
+        'matériaux de construction': 'Building Materials',
+        'chauffage, climatisation et ventilation': 'Heating, Cooling & Ventilation',
+        'couvre-plancher': 'Flooring',
+        'salle de bains': 'Bathroom',
+        'peinture': 'Paint',
+        'portes et fenêtres': 'Doors & Windows',
+        'meubles et décor': 'Furniture & Decoration',
+        'quincaillerie': 'Hardware',
+        'nouveautés': 'New arrivals',
+        'rangement et nettoyage': 'Storage & Cleaning',
+        'outils': 'Tools',
+        'automobile': 'Automotive',
+        'cuisine': 'Kitchen',
+        'plomberie': 'Plumbing',
+        'électricité et luminaires': 'Electrical & Lighting',
+        "produits d'ici": 'Local Products',
+        'product from here': 'Local Products'
+    }
+
+    def normalize_bilingual_category(cat_str):
+        if not cat_str or pd.isna(cat_str):
+            return "Uncategorized"
+        s = str(cat_str).strip()
+        s_lower = s.lower()
+        return bilingual_map.get(s_lower, s)
+
     # ---------------------------------------------------------
     # 🔍 HIERARCHICAL TAXONOMY RESOLUTION WITH BREADCRUMB PARSING
     # ---------------------------------------------------------
@@ -393,7 +422,6 @@ def render_single_campaign_matrix():
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
             
-            # Resolve Column Sources
             col_l1, src_l1 = resolve_taxonomy_column_by_level(df_prod, level=1)
             col_l2, src_l2 = resolve_taxonomy_column_by_level(df_prod, level=2)
             col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
@@ -403,13 +431,25 @@ def render_single_campaign_matrix():
                     return pd.DataFrame()
                 
                 df_temp = df_prod.copy()
+                # 1. Split breadcrumbs
                 df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
-                
                 df_temp = df_temp[df_temp['Parsed_Cat'].notna()]
+                
                 if df_temp.empty:
                     return pd.DataFrame()
 
-                c_agg = df_temp.groupby('Parsed_Cat').agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                # 2. Normalize FR -> EN categories
+                df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(normalize_bilingual_category)
+
+                # 3. Aggregate metrics across unified categories
+                c_agg = df_temp.groupby('Parsed_Cat').agg(
+                    Count=('SKU', 'count'), 
+                    Views=('Views', 'sum'), 
+                    Clicks=('Clicks', 'sum'), 
+                    Clips=('Clips', 'sum'), 
+                    TTMs=('TTMs', 'sum')
+                ).reset_index()
+                
                 c_agg.rename(columns={'Parsed_Cat': 'Category Name'}, inplace=True)
                 
                 c_agg['Item Allocation'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
@@ -432,9 +472,6 @@ def render_single_campaign_matrix():
                 
             df_prod_bands = df_prod.copy()
             
-            # ---------------------------------------------------------
-            # 💰 PRICE & DISCOUNT BINS FIX (PREVENTS VALUEERROR)
-            # ---------------------------------------------------------
             if 'Curr_Price' in df_prod_bands.columns:
                 df_prod_bands['Curr_Price'] = pd.to_numeric(
                     df_prod_bands['Curr_Price'].astype(str).str.replace('$', '', regex=False).str.strip(), 
@@ -451,11 +488,9 @@ def render_single_campaign_matrix():
             else:
                 df_prod_bands['Discount_Pct'] = 0.0
 
-            # 10 Bins -> 9 Labels
             price_bins = [-1.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 1500.0, float('inf')]
             price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
             
-            # 6 Bins -> 5 Labels
             discount_bins = [-1.0, 0.0, 15.0, 30.0, 50.0, float('inf')]
             discount_labels = ["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"]
 

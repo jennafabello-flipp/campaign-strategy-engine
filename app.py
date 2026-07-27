@@ -373,7 +373,6 @@ def render_single_campaign_matrix():
 
         return None, "N/A"
 
-    # Helper function to parse breadcrumbs ('Outdoor & Garden > Lawn Care' -> Level 1, 2, or 3)
     def parse_breadcrumb_level(val, level):
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "uncategorized":
             return None
@@ -404,10 +403,8 @@ def render_single_campaign_matrix():
                     return pd.DataFrame()
                 
                 df_temp = df_prod.copy()
-                # Apply IF statement breadcrumb parsing
                 df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
                 
-                # Filter out nulls/unassigned levels
                 df_temp = df_temp[df_temp['Parsed_Cat'].notna()]
                 if df_temp.empty:
                     return pd.DataFrame()
@@ -435,11 +432,35 @@ def render_single_campaign_matrix():
                 
             df_prod_bands = df_prod.copy()
             
-            price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
-            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1500+"]
+            # ---------------------------------------------------------
+            # 💰 PRICE & DISCOUNT BINS FIX (PREVENTS VALUEERROR)
+            # ---------------------------------------------------------
+            if 'Curr_Price' in df_prod_bands.columns:
+                df_prod_bands['Curr_Price'] = pd.to_numeric(
+                    df_prod_bands['Curr_Price'].astype(str).str.replace('$', '', regex=False).str.strip(), 
+                    errors='coerce'
+                ).fillna(0)
+            else:
+                df_prod_bands['Curr_Price'] = 0.0
+
+            if 'Discount_Pct' in df_prod_bands.columns:
+                df_prod_bands['Discount_Pct'] = pd.to_numeric(
+                    df_prod_bands['Discount_Pct'].astype(str).str.replace('%', '', regex=False).str.strip(), 
+                    errors='coerce'
+                ).fillna(0)
+            else:
+                df_prod_bands['Discount_Pct'] = 0.0
+
+            # 10 Bins -> 9 Labels
+            price_bins = [-1.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 1500.0, float('inf')]
+            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
             
+            # 6 Bins -> 5 Labels
+            discount_bins = [-1.0, 0.0, 15.0, 30.0, 50.0, float('inf')]
+            discount_labels = ["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"]
+
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=price_bins, labels=price_labels)
-            df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
+            df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=discount_bins, labels=discount_labels)
             
             p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
             p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0

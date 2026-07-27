@@ -341,8 +341,7 @@ def render_single_campaign_matrix():
     src_l1 = src_l2 = src_l3 = "N/A"
 
     # ---------------------------------------------------------
-    # 🔍 HIERARCHICAL TAXONOMY RESOLUTION FUNCTION
-    # Tier 1 (Custom IDs) -> Tier 2 (Retailer) -> Tier 3 (Google L1/L2/L3)
+    # 🔍 HIERARCHICAL TAXONOMY RESOLUTION WITH BREADCRUMB PARSING
     # ---------------------------------------------------------
     def resolve_taxonomy_column_by_level(df, level):
         if level == 1:
@@ -350,32 +349,41 @@ def render_single_campaign_matrix():
             tier2 = ['Retailer Category L1', 'Retailer Category', 'Category L1', 'Department L1', 'Dept L1']
             tier3 = ['Google Category L1', 'L1_Category', 'Google Category']
         elif level == 2:
-            tier1 = ['Custom ID 2', 'Custom Category L2', 'Custom_ID_2']
-            tier2 = ['Retailer Category L2', 'Retailer Subcategory', 'Category L2', 'Department L2', 'Dept L2']
-            tier3 = ['Google Category L2', 'L2_Category', 'Google Category.1']
+            tier1 = ['Custom ID 2', 'Custom Category L2', 'Custom_ID_2', 'Custom ID 1', 'Custom ID']
+            tier2 = ['Retailer Category L2', 'Retailer Subcategory', 'Category L2', 'Department L2', 'Dept L2', 'Retailer Category']
+            tier3 = ['Google Category L2', 'L2_Category', 'Google Category.1', 'Google Category L1', 'Google Category']
         elif level == 3:
-            tier1 = ['Custom ID 3', 'Custom Category L3', 'Custom_ID_3']
-            tier2 = ['Retailer Category L3', 'Retailer Sub-subcategory', 'Category L3', 'Department L3', 'Dept L3']
-            tier3 = ['Google Category L3', 'L3_Category', 'Google Category.2']
+            tier1 = ['Custom ID 3', 'Custom Category L3', 'Custom_ID_3', 'Custom ID 1', 'Custom ID']
+            tier2 = ['Retailer Category L3', 'Retailer Sub-subcategory', 'Category L3', 'Department L3', 'Dept L3', 'Retailer Category']
+            tier3 = ['Google Category L3', 'L3_Category', 'Google Category.2', 'Google Category L1', 'Google Category']
         else:
             return None, "N/A"
 
-        # Check Tier 1 (Custom IDs)
         for col in tier1:
             if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
                 return col, 'Custom ID'
 
-        # Check Tier 2 (Retailer Category)
         for col in tier2:
             if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
                 return col, 'Retailer Category'
 
-        # Check Tier 3 (Google Category)
         for col in tier3:
             if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any():
                 return col, 'Google Category'
 
         return None, "N/A"
+
+    # Helper function to parse breadcrumbs ('Outdoor & Garden > Lawn Care' -> Level 1, 2, or 3)
+    def parse_breadcrumb_level(val, level):
+        if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "uncategorized":
+            return None
+        s = str(val).strip()
+        if '>' in s:
+            parts = [p.strip() for p in s.split('>')]
+            if len(parts) >= level:
+                return parts[level - 1]
+            return None
+        return s if level == 1 else None
 
     if merch_file:
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
@@ -386,31 +394,35 @@ def render_single_campaign_matrix():
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
             
-            # Resolve Category Columns per Tier Hierarchy
+            # Resolve Column Sources
             col_l1, src_l1 = resolve_taxonomy_column_by_level(df_prod, level=1)
             col_l2, src_l2 = resolve_taxonomy_column_by_level(df_prod, level=2)
             col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
 
-            def build_cat_agg(cat_col):
+            def build_cat_agg(cat_col, level):
                 if not cat_col or cat_col not in df_prod.columns:
                     return pd.DataFrame()
                 
                 df_temp = df_prod.copy()
-                df_temp[cat_col] = df_temp[cat_col].fillna("Uncategorized").astype(str).str.strip()
-                # Clean breadcrumb strings if present (e.g. 'Outdoor & Garden > Lawn Care' -> 'Outdoor & Garden')
-                df_temp[cat_col] = df_temp[cat_col].apply(lambda x: x.split('>')[0].strip() if '>' in x else x)
+                # Apply IF statement breadcrumb parsing
+                df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
+                
+                # Filter out nulls/unassigned levels
+                df_temp = df_temp[df_temp['Parsed_Cat'].notna()]
+                if df_temp.empty:
+                    return pd.DataFrame()
 
-                c_agg = df_temp.groupby(cat_col).agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
-                c_agg.rename(columns={cat_col: 'Category Name'}, inplace=True)
+                c_agg = df_temp.groupby('Parsed_Cat').agg(Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                c_agg.rename(columns={'Parsed_Cat': 'Category Name'}, inplace=True)
                 
                 c_agg['Item Allocation'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
                 c_agg['Item Click'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
                 c_agg['Add to List'] = c_agg['Clips'] / c_agg['Clips'].sum() if c_agg['Clips'].sum() > 0 else 0
                 return c_agg
 
-            cat_l1_agg = build_cat_agg(col_l1)
-            cat_l2_agg = build_cat_agg(col_l2)
-            cat_l3_agg = build_cat_agg(col_l3)
+            cat_l1_agg = build_cat_agg(col_l1, level=1)
+            cat_l2_agg = build_cat_agg(col_l2, level=2)
+            cat_l3_agg = build_cat_agg(col_l3, level=3)
             
             brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
             brand_agg['Click Share %'] = brand_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
@@ -424,7 +436,7 @@ def render_single_campaign_matrix():
             df_prod_bands = df_prod.copy()
             
             price_bins = [-1, 10, 25, 50, 100, 250, 500, 1000, 1500, float('inf')]
-            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
+            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1500+"]
             
             df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=price_bins, labels=price_labels)
             df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=[-1, 0, 15, 30, 50, float('inf')], labels=["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"])
@@ -610,7 +622,6 @@ def render_single_campaign_matrix():
             st.markdown("**Discount Band Performance**")
             st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        # --- SIDE-BY-SIDE PRICE BAND GRAPHS ---
         col_pb1, col_pb2 = st.columns(2)
         
         with col_pb1:

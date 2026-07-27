@@ -693,25 +693,25 @@ def render_head_to_head_variance():
 
     st.write("---")
     st.header("⚖️ Head-to-Head Campaign Comparison")
-    st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate YoY variance and side-by-side performance tables.")
+    st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate period-over-period variance and side-by-side performance tables.")
 
     # Dual-upload for Merchandise Metrics
     st.markdown("### 🛒 Merchandise Metrics")
     col1, col2 = st.columns(2)
     with col1:
-        base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_merch")
+        base_merch_file = st.file_uploader("📤 Upload BASE Merchandise Metrics", type=['csv', 'xlsx'], key="base_merch")
     with col2:
-        new_merch_file = st.file_uploader("📤 Upload NEW Merchandise Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_merch")
+        new_merch_file = st.file_uploader("📤 Upload NEW Merchandise Metrics", type=['csv', 'xlsx'], key="new_merch")
 
     # Optional Funnel Metrics (Standalone)
     st.markdown("### 📊 Optional: Funnel Metrics")
-    st.info("Upload Base and New Funnel Metrics to unlock Macro YoY Performance (Opens, UEV, Time Spent). This runs independently even without Merchandise files.")
+    st.info("Upload Base and New Funnel Metrics to unlock Macro Performance comparison (Opens, UEV, Time Spent). This runs independently even without Merchandise files.")
     
     col3, col4 = st.columns(2)
     with col3:
-        base_funnel_file = st.file_uploader("📤 Upload BASE Funnel Metrics (e.g., FY26)", type=['csv', 'xlsx'], key="base_funnel")
+        base_funnel_file = st.file_uploader("📤 Upload BASE Funnel Metrics", type=['csv', 'xlsx'], key="base_funnel")
     with col4:
-        new_funnel_file = st.file_uploader("📤 Upload NEW Funnel Metrics (e.g., FY27)", type=['csv', 'xlsx'], key="new_funnel")
+        new_funnel_file = st.file_uploader("📤 Upload NEW Funnel Metrics", type=['csv', 'xlsx'], key="new_funnel")
 
     # A button to run the comparison once files are dropped in
     if st.button("🚀 Run Head-to-Head Analysis"):
@@ -861,7 +861,6 @@ def render_head_to_head_variance():
 
                 avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
 
-                # Conversion Ratios
                 open_rate = (opens / impressions) if impressions > 0 else 0
                 eng_rate = (uevs / opens) if opens > 0 else 0
                 ctor = (clicks / opens) if opens > 0 else 0
@@ -890,30 +889,30 @@ def render_head_to_head_variance():
             b_metrics = extract_funnel_metrics_by_name(f_base)
             n_metrics = extract_funnel_metrics_by_name(f_new)
 
-            def get_funnel_yoy(new_val, base_val):
+            def get_variance(new_val, base_val):
                 return (new_val - base_val) / base_val if base_val > 0 else 0
 
-            st.subheader("🚀 Top-of-Funnel Macro Performance (YoY)")
+            st.subheader("🚀 Top-of-Funnel Macro Performance Comparison")
             
             funnel_data = {
-                "Metric": ["Historical (Base)", "Current (New)", "YoY Variance"],
-                "Impressions": [f"{b_metrics['Impressions']:,.0f}", f"{n_metrics['Impressions']:,.0f}", f"{get_funnel_yoy(n_metrics['Impressions'], b_metrics['Impressions']):+.2%}"],
-                "Flyer Opens": [f"{b_metrics['Flyer Opens']:,.0f}", f"{n_metrics['Flyer Opens']:,.0f}", f"{get_funnel_yoy(n_metrics['Flyer Opens'], b_metrics['Flyer Opens']):+.2%}"],
-                "Open Rate %": [f"{b_metrics['Open Rate %']:.2%}", f"{n_metrics['Open Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Open Rate %'], b_metrics['Open Rate %']):+.2%}"],
-                "Unique Engagements": [f"{b_metrics['Unique Engagements']:,.0f}", f"{n_metrics['Unique Engagements']:,.0f}", f"{get_funnel_yoy(n_metrics['Unique Engagements'], b_metrics['Unique Engagements']):+.2%}"],
-                "Engagement Rate %": [f"{b_metrics['Engagement Rate %']:.2%}", f"{n_metrics['Engagement Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Engagement Rate %'], b_metrics['Engagement Rate %']):+.2%}"],
-                "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_funnel_yoy(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
-                "CTOR %": [f"{b_metrics['CTOR %']:.2%}", f"{n_metrics['CTOR %']:.2%}", f"{get_funnel_yoy(n_metrics['CTOR %'], b_metrics['CTOR %']):+.2%}"],
-                "Transfer to Site": [f"{b_metrics['Transfer to Site']:,.0f}", f"{n_metrics['Transfer to Site']:,.0f}", f"{get_funnel_yoy(n_metrics['Transfer to Site'], b_metrics['Transfer to Site']):+.2%}"],
-                "Shopping List Adds": [f"{b_metrics['Shopping List Adds']:,.0f}", f"{n_metrics['Shopping List Adds']:,.0f}", f"{get_funnel_yoy(n_metrics['Shopping List Adds'], b_metrics['Shopping List Adds']):+.2%}"],
-                "Intent Rate %": [f"{b_metrics['Intent Rate %']:.2%}", f"{n_metrics['Intent Rate %']:.2%}", f"{get_funnel_yoy(n_metrics['Intent Rate %'], b_metrics['Intent Rate %']):+.2%}"],
-                "Avg Time Spent": [b_metrics['Formatted Time'], n_metrics['Formatted Time'], f"{get_funnel_yoy(n_metrics['Raw Avg Time Sec'], b_metrics['Raw Avg Time Sec']):+.2%}"]
+                "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
+                "Impressions": [f"{b_metrics['Impressions']:,.0f}", f"{n_metrics['Impressions']:,.0f}", f"{get_variance(n_metrics['Impressions'], b_metrics['Impressions']):+.2%}"],
+                "Flyer Opens": [f"{b_metrics['Flyer Opens']:,.0f}", f"{n_metrics['Flyer Opens']:,.0f}", f"{get_variance(n_metrics['Flyer Opens'], b_metrics['Flyer Opens']):+.2%}"],
+                "Open Rate %": [f"{b_metrics['Open Rate %']:.2%}", f"{n_metrics['Open Rate %']:.2%}", f"{get_variance(n_metrics['Open Rate %'], b_metrics['Open Rate %']):+.2%}"],
+                "Unique Engagements": [f"{b_metrics['Unique Engagements']:,.0f}", f"{n_metrics['Unique Engagements']:,.0f}", f"{get_variance(n_metrics['Unique Engagements'], b_metrics['Unique Engagements']):+.2%}"],
+                "Engagement Rate %": [f"{b_metrics['Engagement Rate %']:.2%}", f"{n_metrics['Engagement Rate %']:.2%}", f"{get_variance(n_metrics['Engagement Rate %'], b_metrics['Engagement Rate %']):+.2%}"],
+                "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_variance(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
+                "CTOR %": [f"{b_metrics['CTOR %']:.2%}", f"{n_metrics['CTOR %']:.2%}", f"{get_variance(n_metrics['CTOR %'], b_metrics['CTOR %']):+.2%}"],
+                "Transfer to Site": [f"{b_metrics['Transfer to Site']:,.0f}", f"{n_metrics['Transfer to Site']:,.0f}", f"{get_variance(n_metrics['Transfer to Site'], b_metrics['Transfer to Site']):+.2%}"],
+                "Shopping List Adds": [f"{b_metrics['Shopping List Adds']:,.0f}", f"{n_metrics['Shopping List Adds']:,.0f}", f"{get_variance(n_metrics['Shopping List Adds'], b_metrics['Shopping List Adds']):+.2%}"],
+                "Intent Rate %": [f"{b_metrics['Intent Rate %']:.2%}", f"{n_metrics['Intent Rate %']:.2%}", f"{get_variance(n_metrics['Intent Rate %'], b_metrics['Intent Rate %']):+.2%}"],
+                "Avg Time Spent": [b_metrics['Formatted Time'], n_metrics['Formatted Time'], f"{get_variance(n_metrics['Raw Avg Time Sec'], b_metrics['Raw Avg Time Sec']):+.2%}"]
             }
             
             df_funnel_summary = pd.DataFrame(funnel_data)
-            export_sheets["Funnel_Macro_YoY"] = df_funnel_summary
+            export_sheets["Funnel_Macro_Comparison"] = df_funnel_summary
 
-            def color_yoy_cells(val):
+            def color_variance_cells(val):
                 if isinstance(val, str):
                     if val.startswith('+') and val != '+0.00%':
                         return 'color: #28a745; font-weight: bold;'
@@ -921,7 +920,7 @@ def render_head_to_head_variance():
                         return 'color: #fd7e14; font-weight: bold;'
                 return ''
 
-            st.dataframe(df_funnel_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
+            st.dataframe(df_funnel_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
         # 🛒 2. MERCHANDISE PROCESSING (BELOW FUNNEL)
@@ -954,10 +953,10 @@ def render_head_to_head_variance():
                 if 'Page Position' in df.columns: cols.append('Page Position')
                 return cols
 
-            # --- MACRO YOY SUMMARY TABLE ---
+            # --- MACRO SUMMARY TABLE ---
             if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
-                st.subheader("📈 Macro Item-Level Performance (YoY)")
+                st.subheader("📈 Macro Item-Level Performance Comparison")
 
                 b_views = df_base['Views'].sum()
                 b_clicks = df_base['Clicks'].sum()
@@ -971,17 +970,17 @@ def render_head_to_head_variance():
                 n_ttms = df_new['TTMs'].sum() if 'TTMs' in df_new.columns else 0
                 n_ttmr = n_ttms / n_views if n_views > 0 else 0
 
-                def get_yoy(new_val, base_val):
+                def get_variance(new_val, base_val):
                     return (new_val - base_val) / base_val if base_val > 0 else 0
 
-                y_views = get_yoy(n_views, b_views)
-                y_clicks = get_yoy(n_clicks, b_clicks)
-                y_ctr = get_yoy(n_ctr, b_ctr)
-                y_ttms = get_yoy(n_ttms, b_ttms)
-                y_ttmr = get_yoy(n_ttmr, b_ttmr)
+                y_views = get_variance(n_views, b_views)
+                y_clicks = get_variance(n_clicks, b_clicks)
+                y_ctr = get_variance(n_ctr, b_ctr)
+                y_ttms = get_variance(n_ttms, b_ttms)
+                y_ttmr = get_variance(n_ttmr, b_ttmr)
 
                 summary_data = {
-                    "Metric": ["Historical (Base)", "Current (New)", "YoY Variance"],
+                    "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
                     "Total Item Views": [f"{b_views:,.0f}", f"{n_views:,.0f}", f"{y_views:+.2%}"],
                     "Item Clicks": [f"{b_clicks:,.0f}", f"{n_clicks:,.0f}", f"{y_clicks:+.2%}"],
                     "Item CTR %": [f"{b_ctr:.2%}", f"{n_ctr:.2%}", f"{y_ctr:+.2%}"],
@@ -989,9 +988,9 @@ def render_head_to_head_variance():
                     "Item TTMR %": [f"{b_ttmr:.2%}", f"{n_ttmr:.2%}", f"{y_ttmr:+.2%}"]
                 }
                 df_summary = pd.DataFrame(summary_data)
-                export_sheets["Merch_Macro_YoY"] = df_summary
+                export_sheets["Merch_Macro_Comparison"] = df_summary
 
-                def color_yoy_cells(val):
+                def color_variance_cells(val):
                     if isinstance(val, str):
                         if val.startswith('+') and val != '+0.00%':
                             return 'color: #28a745; font-weight: bold;'
@@ -999,7 +998,7 @@ def render_head_to_head_variance():
                             return 'color: #fd7e14; font-weight: bold;'
                     return ''
 
-                st.dataframe(df_summary.style.map(color_yoy_cells), use_container_width=True, hide_index=True)
+                st.dataframe(df_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
 
             # ---------------------------------------------------------
             # 📖 PAGE-BY-PAGE HEATMAP & DROP-OFF ANALYSIS
@@ -1064,16 +1063,16 @@ def render_head_to_head_variance():
                                       new_cat_agg[['Category', 'New Clicks', 'New CTR %', 'New Click Share %']],
                                       on='Category', how='outer').fillna(0)
 
-                cat_merged['Click Share YoY Shift'] = cat_merged['New Click Share %'] - cat_merged['Base Click Share %']
+                cat_merged['Click Share Shift'] = cat_merged['New Click Share %'] - cat_merged['Base Click Share %']
                 cat_merged = cat_merged.sort_values(by='New Clicks', ascending=False)
 
-                export_sheets["Category_Performance_YoY"] = cat_merged
+                export_sheets["Category_Performance"] = cat_merged
 
                 st.dataframe(
                     cat_merged.style.format({
                         'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}', 'Base Click Share %': '{:.2%}',
                         'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}', 'New Click Share %': '{:.2%}',
-                        'Click Share YoY Shift': '{:+.2%}'
+                        'Click Share Shift': '{:+.2%}'
                     }),
                     use_container_width=True,
                     hide_index=True
@@ -1109,17 +1108,17 @@ def render_head_to_head_variance():
                                           df_new_rep[[item_col, 'Clicks', 'New CTR %']],
                                           on=item_col, suffixes=(' Base', ' New'))
                     
-                    rep_merged['CTR % YoY Variance'] = np.where(rep_merged['Base CTR %'] > 0, (rep_merged['New CTR %'] - rep_merged['Base CTR %']) / rep_merged['Base CTR %'], 0)
+                    rep_merged['CTR % Variance'] = np.where(rep_merged['Base CTR %'] > 0, (rep_merged['New CTR %'] - rep_merged['Base CTR %']) / rep_merged['Base CTR %'], 0)
                     rep_merged = rep_merged.sort_values(by='Clicks New', ascending=False).head(10)
                     
-                    export_sheets["Repeat_Items_YoY"] = rep_merged
+                    export_sheets["Repeat_Items_Comparison"] = rep_merged
 
-                    st.markdown("**Top Repeat Items Performance YoY**")
+                    st.markdown("**Top Repeat Items Performance Comparison**")
                     st.dataframe(
                         rep_merged.style.format({
                             'Clicks Base': '{:,.0f}', 'Base CTR %': '{:.2%}',
                             'Clicks New': '{:,.0f}', 'New CTR %': '{:.2%}',
-                            'CTR % YoY Variance': '{:+.2%}'
+                            'CTR % Variance': '{:+.2%}'
                         }),
                         use_container_width=True,
                         hide_index=True

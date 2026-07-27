@@ -369,6 +369,38 @@ def render_single_campaign_matrix():
         s_lower = s.lower()
         return bilingual_map.get(s_lower, s)
 
+    # 🔍 EXTRACT ALL FLYER RUN NAMES & DATES METADATA
+    def extract_campaign_header_metadata(df):
+        merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
+        
+        # Outlines ALL Flyer Run Names
+        if 'Flyer Run Name' in df.columns:
+            runs = df['Flyer Run Name'].dropna().astype(str).str.strip().unique()
+            run_name = ", ".join(runs) if len(runs) > 0 else "N/A"
+        else:
+            run_name = "N/A"
+            
+        # Outlines ALL Flyer Run IDs
+        if 'Flyer Run ID' in df.columns:
+            run_ids = df['Flyer Run ID'].dropna().astype(str).str.strip().unique()
+            run_id = ", ".join(run_ids) if len(run_ids) > 0 else "N/A"
+        else:
+            run_id = "N/A"
+        
+        # Outlines From Date and To Date
+        date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
+        if date_col and date_col in df.columns:
+            parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+            if len(parsed_dates) > 0:
+                date_from = parsed_dates.min().strftime('%Y-%m-%d')
+                date_to = parsed_dates.max().strftime('%Y-%m-%d')
+            else:
+                date_from, date_to = "N/A", "N/A"
+        else:
+            date_from, date_to = "N/A", "N/A"
+            
+        return merchant, run_name, run_id, date_from, date_to
+
     # ---------------------------------------------------------
     # 🔍 HIERARCHICAL TAXONOMY RESOLUTION WITH BREADCRUMB PARSING
     # ---------------------------------------------------------
@@ -417,7 +449,9 @@ def render_single_campaign_matrix():
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
         if df_clean is not None:
             df_prod, df_creative, global_totals = process_metrics(df_clean, m)
-            merchant, run_name, run_id, date_from, date_to = extract_exact_metadata(df_clean)
+            
+            # Extract detailed campaign metadata
+            merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(df_clean)
             
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
@@ -431,17 +465,14 @@ def render_single_campaign_matrix():
                     return pd.DataFrame()
                 
                 df_temp = df_prod.copy()
-                # 1. Split breadcrumbs
                 df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
                 df_temp = df_temp[df_temp['Parsed_Cat'].notna()]
                 
                 if df_temp.empty:
                     return pd.DataFrame()
 
-                # 2. Normalize FR -> EN categories
                 df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(normalize_bilingual_category)
 
-                # 3. Aggregate metrics across unified categories
                 c_agg = df_temp.groupby('Parsed_Cat').agg(
                     Count=('SKU', 'count'), 
                     Views=('Views', 'sum'), 
@@ -549,7 +580,20 @@ def render_single_campaign_matrix():
     )
 
     if merch_file and df_clean is not None:
-        st.info(f"📍 **ACTIVE FLIGHT RECAP:** {merchant}  |  **Flight Group:** {run_name} (ID: {run_id})  |  **Window:** {date_from} to {date_to}")
+        # ---------------------------------------------------------
+        # 📋 ENHANCED CAMPAIGN CONTEXT & OVERVIEW CARD (MATCHES MODULE 2)
+        # ---------------------------------------------------------
+        st.write("---")
+        st.subheader("📋 Campaign Context & Overview")
+        
+        info_c1, info_c2 = st.columns(2)
+        with info_c1:
+            st.markdown(f"* **Merchant:** `{merchant}`")
+            st.markdown(f"* **Flyer Run Name(s):** `{run_name}`")
+        with info_c2:
+            st.markdown(f"* **Flyer Run ID(s):** `{run_id}`")
+            st.markdown(f"* **Active Window:** `{date_from} to {date_to}`")
+        st.write("---")
         
         top_cat = "General Merchandise"
         if not cat_l1_agg.empty and 'Clicks' in cat_l1_agg.columns:

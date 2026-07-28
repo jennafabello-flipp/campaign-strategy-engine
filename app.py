@@ -320,7 +320,6 @@ def render_single_campaign_matrix():
     import plotly.express as px
     import streamlit as st
 
-    # Update Header & Subheader
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
     
@@ -334,15 +333,18 @@ def render_single_campaign_matrix():
         st.info("⚠️ **Waiting for data:** Please upload a Merchandise file, a Scroll Depth file, or both to begin analysis.")
         return
 
-    pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = pd.DataFrame()
+    pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = s_agg_sorted = pd.DataFrame()
     df_sc_table = pd.DataFrame()
     weekly_scroll = pd.DataFrame()
     qbr_insights = None
     
     src_l1 = src_l2 = src_l3 = "N/A"
+    col_sale_story = None
 
-    # 🌐 BILINGUAL TRANSLATION MAP (FR -> EN)
-    bilingual_map = {
+    # ---------------------------------------------------------
+    # 🌐 COMPREHENSIVE BILINGUAL MAPPING ENGINE (FR -> EN)
+    # ---------------------------------------------------------
+    bilingual_category_map = {
         'extérieur et jardin': 'Outdoor & Garden',
         'matériaux de construction': 'Building Materials',
         'chauffage, climatisation et ventilation': 'Heating, Cooling & Ventilation',
@@ -363,32 +365,43 @@ def render_single_campaign_matrix():
         'product from here': 'Local Products'
     }
 
-    def normalize_bilingual_category(cat_str):
-        if not cat_str or pd.isna(cat_str):
-            return "Uncategorized"
-        s = str(cat_str).strip()
-        s_lower = s.lower()
-        return bilingual_map.get(s_lower, s)
+    bilingual_sale_story_map = {
+        'aubaine': 'Hot Deal',
+        'liquidation': 'Clearance',
+        'choc des prix': 'Price Shock',
+        'spécial': 'Special Offer',
+        'acheter 1 obtenir 1': 'Buy 1 Get 1',
+        'rabais exceptionnel': 'Mega Discount',
+        'solde': 'Sale',
+        'prix réduit': 'Reduced Price',
+        'économie': 'Savings'
+    }
 
-    # 🔍 EXTRACT ALL FLYER RUN NAMES & DATES METADATA
+    def normalize_text_bilingual(text, mapping_dict):
+        if not text or pd.isna(text):
+            return "Uncategorized / Standard"
+        s = str(text).strip()
+        s_lower = s.lower()
+        return mapping_dict.get(s_lower, s)
+
+    # ---------------------------------------------------------
+    # 🔍 CAMPAIGN HEADER METADATA EXTRACTOR
+    # ---------------------------------------------------------
     def extract_campaign_header_metadata(df):
         merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
         
-        # Outlines ALL Flyer Run Names
         if 'Flyer Run Name' in df.columns:
             runs = df['Flyer Run Name'].dropna().astype(str).str.strip().unique()
             run_name = ", ".join(runs) if len(runs) > 0 else "N/A"
         else:
             run_name = "N/A"
             
-        # Outlines ALL Flyer Run IDs
         if 'Flyer Run ID' in df.columns:
             run_ids = df['Flyer Run ID'].dropna().astype(str).str.strip().unique()
             run_id = ", ".join(run_ids) if len(run_ids) > 0 else "N/A"
         else:
             run_id = "N/A"
         
-        # Outlines From Date and To Date
         date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
         if date_col and date_col in df.columns:
             parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
@@ -446,12 +459,13 @@ def render_single_campaign_matrix():
             return None
         return s if level == 1 else None
 
+    # ---------------------------------------------------------
+    # ⚙️ DATA PROCESSING PIPELINE
+    # ---------------------------------------------------------
     if merch_file:
         df_clean, m, header_idx = scrub_and_load_excel(merch_file)
         if df_clean is not None:
             df_prod, df_creative, global_totals = process_metrics(df_clean, m)
-            
-            # Extract detailed campaign metadata
             merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(df_clean)
             
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
@@ -472,7 +486,8 @@ def render_single_campaign_matrix():
                 if df_temp.empty:
                     return pd.DataFrame()
 
-                df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(normalize_bilingual_category)
+                # Apply English/French unification
+                df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(lambda x: normalize_text_bilingual(x, bilingual_category_map))
 
                 c_agg = df_temp.groupby('Parsed_Cat').agg(
                     Count=('SKU', 'count'), 
@@ -504,6 +519,7 @@ def render_single_campaign_matrix():
                 
             df_prod_bands = df_prod.copy()
             
+            # Sanitize prices and discounts
             if 'Curr_Price' in df_prod_bands.columns:
                 df_prod_bands['Curr_Price'] = pd.to_numeric(
                     df_prod_bands['Curr_Price'].astype(str).str.replace('$', '', regex=False).str.strip(), 
@@ -541,6 +557,25 @@ def render_single_campaign_matrix():
             d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
             d_agg = d_agg[d_agg['Items'] > 0]
 
+            # Build Sale Story DataFrame
+            sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout']
+            col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
+
+            if col_sale_story:
+                df_ss_temp = df_prod_bands.copy()
+                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].apply(lambda x: normalize_text_bilingual(x, bilingual_sale_story_map))
+                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].replace({'': 'Standard Price / No Callout', 'nan': 'Standard Price / No Callout', 'None': 'Standard Price / No Callout'})
+
+                s_agg = df_ss_temp.groupby(col_sale_story, observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                tot_ss_clicks = s_agg['Clicks'].sum()
+                tot_ss_clips = s_agg['Clips'].sum()
+                tot_ss_ttms = s_agg['TTMs'].sum()
+
+                s_agg['Click Share %'] = s_agg['Clicks'] / tot_ss_clicks if tot_ss_clicks > 0 else 0
+                s_agg['List Share %'] = s_agg['Clips'] / tot_ss_clips if tot_ss_clips > 0 else 0
+                s_agg['TTM Share %'] = s_agg['TTMs'] / tot_ss_ttms if tot_ss_ttms > 0 else 0
+                s_agg_sorted = s_agg.sort_values(by='Clicks', ascending=False).rename(columns={col_sale_story: 'Sale Story Callout'})
+
     if scroll_file:
         try:
             df_sc_raw, weekly_scroll, qbr_insights = process_scroll_file(scroll_file)
@@ -548,6 +583,9 @@ def render_single_campaign_matrix():
         except Exception as e:
             st.warning(f"Could not process the scroll file. Error: {str(e)}")
 
+    # ---------------------------------------------------------
+    # 📥 EXCEL REPORT GENERATION
+    # ---------------------------------------------------------
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         wrote_any = False
@@ -560,6 +598,7 @@ def render_single_campaign_matrix():
             if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
             p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
             d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
+            if col_sale_story and not s_agg_sorted.empty: s_agg_sorted.to_excel(writer, sheet_name='Sale Story Performance', index=False)
             wrote_any = True
         if not df_sc_table.empty:
             df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
@@ -580,10 +619,10 @@ def render_single_campaign_matrix():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+    # ---------------------------------------------------------
+    # 📌 RENDER DASHBOARD LAYOUT
+    # ---------------------------------------------------------
     if merch_file and df_clean is not None:
-        # ---------------------------------------------------------
-        # 📋 ENHANCED CAMPAIGN CONTEXT & OVERVIEW CARD (MATCHES MODULE 2)
-        # ---------------------------------------------------------
         st.write("---")
         st.subheader("📋 Campaign Context & Overview")
         
@@ -697,7 +736,7 @@ def render_single_campaign_matrix():
                 st.info("⚠️ No L3 taxonomy column containing data was detected in the file.")
 
         st.write("---")
-        st.subheader("🏬 Top Brands by Click & Marketing Asset Summary")
+        st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
         b_col, c_col = st.columns(2)
         with b_col:
             st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
@@ -708,79 +747,71 @@ def render_single_campaign_matrix():
             if not df_creative.empty:
                 st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-        # ==============================================================================
+        # ---------------------------------------------------------
         # 💰 PRICING, DISCOUNT & SALE STORY BAND ANALYSIS
-        # ==============================================================================
+        # ---------------------------------------------------------
         st.write("---")
         st.subheader("💰 Pricing, Promotional & Sale Story Analysis")
-        band_fmt = {
-            'Items': '{:,.0f}', 
-            'Clicks': '{:,.0f}', 
-            'Clips': '{:,.0f}', 
-            'TTMs': '{:,.0f}', 
-            'Click Share %': '{:.2%}', 
-            'List Share %': '{:.2%}', 
-            'TTM Share %': '{:.2%}'
-        }
+        band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
         
         p_agg_sorted = p_agg.sort_values(by='Price_Tier')
         d_agg_sorted = d_agg.sort_values(by='Discount_Tier')
 
-        # --- Top Row: Price Band & Discount Band Performance ---
         c_p, c_d = st.columns(2)
         with c_p: 
             st.markdown("**Price Band Performance**")
-            st.dataframe(
-                p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), 
-                use_container_width=True, 
-                hide_index=True
-            )
+            st.dataframe(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
         with c_d: 
             st.markdown("**Discount Band Performance**")
-            st.dataframe(
-                d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), 
-                use_container_width=True, 
-                hide_index=True
-            )
+            st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        # --- NEW TABLE: Sale Story Performance (Placed Beneath Discount Band) ---
-        sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout']
-        col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
-
-        if col_sale_story:
+        # --- NEW SALE STORY PERFORMANCE TABLE ---
+        if col_sale_story and not s_agg_sorted.empty:
             st.write("")
             st.markdown(f"**🏷️ Sale Story & Promotional Hook Performance** *(Mapped via `{col_sale_story}`)*")
-            
-            df_ss_temp = df_prod_bands.copy()
-            df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].fillna("Standard Price / No Callout").astype(str).str.strip()
-            df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].replace({'': 'Standard Price / No Callout', 'nan': 'Standard Price / No Callout'})
-
-            s_agg = df_ss_temp.groupby(col_sale_story, observed=False).agg(
-                Items=('SKU', 'nunique'), 
-                Clicks=('Clicks', 'sum'), 
-                Clips=('Clips', 'sum'), 
-                TTMs=('TTMs', 'sum')
-            ).reset_index()
-
-            # Calculate proportional shares
-            tot_ss_clicks = s_agg['Clicks'].sum()
-            tot_ss_clips = s_agg['Clips'].sum()
-            tot_ss_ttms = s_agg['TTMs'].sum()
-
-            s_agg['Click Share %'] = s_agg['Clicks'] / tot_ss_clicks if tot_ss_clicks > 0 else 0
-            s_agg['List Share %'] = s_agg['Clips'] / tot_ss_clips if tot_ss_clips > 0 else 0
-            s_agg['TTM Share %'] = s_agg['TTMs'] / tot_ss_ttms if tot_ss_ttms > 0 else 0
-            
-            s_agg_sorted = s_agg.sort_values(by='Clicks', ascending=False)
-            s_agg_sorted.rename(columns={col_sale_story: 'Sale Story Callout'}, inplace=True)
-
             st.dataframe(
                 s_agg_sorted[['Sale Story Callout', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt),
                 use_container_width=True,
                 hide_index=True
             )
-        else:
-            st.caption("ℹ️ *No 'Sale Story' or 'Offer Type' column detected in the uploaded file to build the Sale Story table.*")
+
+        # ---------------------------------------------------------
+        # 📊 RESTORED SIDE-BY-SIDE PRICE BAND CHARTS
+        # ---------------------------------------------------------
+        st.write("")
+        col_pb1, col_pb2 = st.columns(2)
+        
+        with col_pb1:
+            df_melt_1 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['Click Share %', 'List Share %'])
+            df_melt_1['variable'] = df_melt_1['variable'].replace({'Click Share %': 'Clicks to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_1 = px.bar(
+                df_melt_1, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_1.update_layout(
+                title=dict(text="Price Band: Clicks vs. Clips Share", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_1, use_container_width=True)
+
+        with col_pb2:
+            df_melt_2 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['TTM Share %', 'List Share %'])
+            df_melt_2['variable'] = df_melt_2['variable'].replace({'TTM Share %': 'TTMs to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_2 = px.bar(
+                df_melt_2, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_2.update_layout(
+                title=dict(text="Price Band: TTMs vs. Clips Share", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_2, use_container_width=True)
 
         st.info("""
         💡 **How to Read the Share Graphs:** These charts display the **Proportional Share of Total**, not raw volume. 
@@ -810,6 +841,9 @@ def render_single_campaign_matrix():
                         top_ttm_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_ttm_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
                         st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
 
+    # ---------------------------------------------------------
+    # 📉 SCROLL RETENTION SECTION
+    # ---------------------------------------------------------
     if scroll_file and not df_sc_table.empty:
         st.write("---")
         st.subheader("📉 Audience Scroll Retention & Drop-off")

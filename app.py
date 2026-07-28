@@ -2122,26 +2122,28 @@ def render_benchmark_scorecard():
     sc2.metric(label="Client Marketing Banner CTR", value=f"{c_bnr_ctr:.2%}", delta=f"{c_bnr_ctr - b_bnr_ctr:+.2%} pts vs Benchmark")
     sc3.metric(label="Avg. Flyer Length (Pages)", value=f"{c_pages:,.1f}", delta=f"{c_pages - b_pages:+.1f} Pages vs Benchmark")
 
-# ==============================================================================
-# 🗺️ NAVIGATION & MAIN APP CONTROL
-# ==============================================================================
-st.sidebar.markdown("<h2 style='color:#002551;'>🚀 Control Panel</h2>", unsafe_allow_html=True)
+# ---------------------------------------------------------
+# 🧭 SIDEBAR NAVIGATION MENU
+# ---------------------------------------------------------
 pipeline_mode = st.sidebar.radio(
     "Select Analysis Module:",
     [
         "🗂️ Module 1: Campaign Performance Breakdown", 
         "⚖️ Module 2: Head-to-Head Comparison", 
-        "🏆 Module 3: Industry Benchmarks - in DEV", 
+        "🏆 Module 3: Industry Benchmarks", 
         "🛒 Module 4: Taylor's Workspace"
     ]
 )
 
-if "Single Campaign" in pipeline_mode: 
+# ---------------------------------------------------------
+# 🚦 MODULE ROUTER (MUST MATCH MENU STRINGS ABOVE)
+# ---------------------------------------------------------
+if "Campaign Performance Breakdown" in pipeline_mode or "Module 1" in pipeline_mode or "Single Campaign" in pipeline_mode:
     render_single_campaign_matrix()
-elif "Head-to-Head" in pipeline_mode: 
+elif "Head-to-Head" in pipeline_mode:
     render_head_to_head_variance()
-elif "Industry Benchmarks" in pipeline_mode: 
-    render_benchmark_scorecard()
-elif "Taylor's Workspace" in pipeline_mode:
+elif "Industry Benchmarks" in pipeline_mode:
+    render_industry_benchmarks()
+elif "Taylor" in pipeline_mode or "Module 4" in pipeline_mode:
     render_taylors_workspace()
     

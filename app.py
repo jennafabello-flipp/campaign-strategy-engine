@@ -311,7 +311,7 @@ def render_insight_box(what, so_what, now_what):
     """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🗂️ MODULE 1: SINGLE CAMPAIGN BREAKDOWN
+# 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN
 # ==============================================================================
 def render_single_campaign_matrix():
     import pandas as pd
@@ -320,8 +320,9 @@ def render_single_campaign_matrix():
     import plotly.express as px
     import streamlit as st
 
-    st.markdown("<div class='main-header'>Single Campaign Breakdown</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload raw exports directly to map campaign performance. Files can be processed together or independently.</div>", unsafe_allow_html=True)
+    # Update Header & Subheader
+    st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
     
     dl_placeholder = st.empty()
     
@@ -2126,12 +2127,12 @@ def render_benchmark_scorecard():
 # ==============================================================================
 st.sidebar.markdown("<h2 style='color:#002551;'>🚀 Control Panel</h2>", unsafe_allow_html=True)
 pipeline_mode = st.sidebar.radio(
-    "Select Strategy Module:", 
+    "Select Analysis Module:",
     [
-        "📁 Single Campaign Breakdown", 
-        "📊 Head-to-Head Comparison", 
-        "🏆 Industry Benchmarks (DNU - IN DEV)",
-        "🧰 Taylor's Workspace"
+        "🗂️ Module 1: Campaign Performance Breakdown", 
+        "⚖️ Module 2: Head-to-Head Comparison", 
+        "🏆 Module 3: Industry Benchmarks - in DEV", 
+        "🛒 Module 4: Taylor's Workspace"
     ]
 )
 

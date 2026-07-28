@@ -317,8 +317,31 @@ def render_single_campaign_matrix():
     import pandas as pd
     import numpy as np
     import io
+    import re
     import plotly.express as px
     import streamlit as st
+
+    # ---------------------------------------------------------
+    # 🏷️ BILINGUAL SALE STORY NORMALIZATION FUNCTION
+    # ---------------------------------------------------------
+    def normalize_sale_story(val):
+        if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() in ["nan", "none", "uncategorized / standard", "uncategorized"]:
+            return "no badge"
+        
+        s = str(val).strip()
+        
+        s_clean = re.sub(r'^(ÉCONOMISEZ|ÉCONOMISER|ECONOMISEZ|ÉCONOMISE)\s*', 'SAVE ', s, flags=re.IGNORECASE).strip()
+        s_clean = re.sub(r'^(LIQUIDATION)\s*', 'CLEARANCE ', s_clean, flags=re.IGNORECASE).strip()
+        s_clean = re.sub(r'^(AUBAINE)\s*', 'HOT DEAL ', s_clean, flags=re.IGNORECASE).strip()
+        s_clean = re.sub(r'^(SOLDE|RABAIS)\s*', 'SALE ', s_clean, flags=re.IGNORECASE).strip()
+        
+        s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*\$', r'SAVE $\1', s_clean, flags=re.IGNORECASE)
+        s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*%', r'SAVE \1%', s_clean, flags=re.IGNORECASE)
+        
+        if s_clean.upper() == "SAVE":
+            return "SAVE"
+            
+        return s_clean
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
@@ -363,18 +386,6 @@ def render_single_campaign_matrix():
         'électricité et luminaires': 'Electrical & Lighting',
         "produits d'ici": 'Local Products',
         'product from here': 'Local Products'
-    }
-
-    bilingual_sale_story_map = {
-        'aubaine': 'Hot Deal',
-        'liquidation': 'Clearance',
-        'choc des prix': 'Price Shock',
-        'spécial': 'Special Offer',
-        'acheter 1 obtenir 1': 'Buy 1 Get 1',
-        'rabais exceptionnel': 'Mega Discount',
-        'solde': 'Sale',
-        'prix réduit': 'Reduced Price',
-        'économie': 'Savings'
     }
 
     def normalize_text_bilingual(text, mapping_dict):
@@ -557,14 +568,13 @@ def render_single_campaign_matrix():
             d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
             d_agg = d_agg[d_agg['Items'] > 0]
 
-            # Build Sale Story DataFrame
-            sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout']
+            # Build Sale Story DataFrame (Bilingual Mapping + "no badge" Blanks)
+            sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout', 'Sale Story Callout']
             col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
 
             if col_sale_story:
                 df_ss_temp = df_prod_bands.copy()
-                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].apply(lambda x: normalize_text_bilingual(x, bilingual_sale_story_map))
-                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].replace({'': 'Standard Price / No Callout', 'nan': 'Standard Price / No Callout', 'None': 'Standard Price / No Callout'})
+                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].apply(normalize_sale_story)
 
                 s_agg = df_ss_temp.groupby(col_sale_story, observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
                 tot_ss_clicks = s_agg['Clicks'].sum()

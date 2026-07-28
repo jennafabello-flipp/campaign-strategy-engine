@@ -708,54 +708,79 @@ def render_single_campaign_matrix():
             if not df_creative.empty:
                 st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
+        # ==============================================================================
+        # 💰 PRICING, DISCOUNT & SALE STORY BAND ANALYSIS
+        # ==============================================================================
         st.write("---")
-        st.subheader("💰 Pricing & Promotional Band Analysis")
-        band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
+        st.subheader("💰 Pricing, Promotional & Sale Story Analysis")
+        band_fmt = {
+            'Items': '{:,.0f}', 
+            'Clicks': '{:,.0f}', 
+            'Clips': '{:,.0f}', 
+            'TTMs': '{:,.0f}', 
+            'Click Share %': '{:.2%}', 
+            'List Share %': '{:.2%}', 
+            'TTM Share %': '{:.2%}'
+        }
         
         p_agg_sorted = p_agg.sort_values(by='Price_Tier')
         d_agg_sorted = d_agg.sort_values(by='Discount_Tier')
 
+        # --- Top Row: Price Band & Discount Band Performance ---
         c_p, c_d = st.columns(2)
         with c_p: 
             st.markdown("**Price Band Performance**")
-            st.dataframe(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+            st.dataframe(
+                p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), 
+                use_container_width=True, 
+                hide_index=True
+            )
         with c_d: 
             st.markdown("**Discount Band Performance**")
-            st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
-            
-        col_pb1, col_pb2 = st.columns(2)
-        
-        with col_pb1:
-            df_melt_1 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['Click Share %', 'List Share %'])
-            df_melt_1['variable'] = df_melt_1['variable'].replace({'Click Share %': 'Clicks to Total', 'List Share %': 'Clips to Total'})
-            
-            fig_price_1 = px.bar(
-                df_melt_1, x='Price_Tier', y='value', color='variable', barmode='group',
-                color_discrete_sequence=['#e97132', '#156082']
+            st.dataframe(
+                d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), 
+                use_container_width=True, 
+                hide_index=True
             )
-            fig_price_1.update_layout(
-                title=dict(text="Price Band Analysis", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
-                yaxis=dict(title="% of Total", tickformat='.1%'), 
-                xaxis=dict(title=None), 
-                legend=dict(title=None)
-            )
-            st.plotly_chart(fig_price_1, use_container_width=True)
+            
+        # --- NEW TABLE: Sale Story Performance (Placed Beneath Discount Band) ---
+        sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout']
+        col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
 
-        with col_pb2:
-            df_melt_2 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['TTM Share %', 'List Share %'])
-            df_melt_2['variable'] = df_melt_2['variable'].replace({'TTM Share %': 'TTMs to Total', 'List Share %': 'Clips to Total'})
+        if col_sale_story:
+            st.write("")
+            st.markdown(f"**🏷️ Sale Story & Promotional Hook Performance** *(Mapped via `{col_sale_story}`)*")
             
-            fig_price_2 = px.bar(
-                df_melt_2, x='Price_Tier', y='value', color='variable', barmode='group',
-                color_discrete_sequence=['#e97132', '#156082']
+            df_ss_temp = df_prod_bands.copy()
+            df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].fillna("Standard Price / No Callout").astype(str).str.strip()
+            df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].replace({'': 'Standard Price / No Callout', 'nan': 'Standard Price / No Callout'})
+
+            s_agg = df_ss_temp.groupby(col_sale_story, observed=False).agg(
+                Items=('SKU', 'nunique'), 
+                Clicks=('Clicks', 'sum'), 
+                Clips=('Clips', 'sum'), 
+                TTMs=('TTMs', 'sum')
+            ).reset_index()
+
+            # Calculate proportional shares
+            tot_ss_clicks = s_agg['Clicks'].sum()
+            tot_ss_clips = s_agg['Clips'].sum()
+            tot_ss_ttms = s_agg['TTMs'].sum()
+
+            s_agg['Click Share %'] = s_agg['Clicks'] / tot_ss_clicks if tot_ss_clicks > 0 else 0
+            s_agg['List Share %'] = s_agg['Clips'] / tot_ss_clips if tot_ss_clips > 0 else 0
+            s_agg['TTM Share %'] = s_agg['TTMs'] / tot_ss_ttms if tot_ss_ttms > 0 else 0
+            
+            s_agg_sorted = s_agg.sort_values(by='Clicks', ascending=False)
+            s_agg_sorted.rename(columns={col_sale_story: 'Sale Story Callout'}, inplace=True)
+
+            st.dataframe(
+                s_agg_sorted[['Sale Story Callout', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt),
+                use_container_width=True,
+                hide_index=True
             )
-            fig_price_2.update_layout(
-                title=dict(text="Price Band Analysis", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
-                yaxis=dict(title="% of Total", tickformat='.1%'), 
-                xaxis=dict(title=None), 
-                legend=dict(title=None)
-            )
-            st.plotly_chart(fig_price_2, use_container_width=True)
+        else:
+            st.caption("ℹ️ *No 'Sale Story' or 'Offer Type' column detected in the uploaded file to build the Sale Story table.*")
 
         st.info("""
         💡 **How to Read the Share Graphs:** These charts display the **Proportional Share of Total**, not raw volume. 

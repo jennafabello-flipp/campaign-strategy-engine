@@ -322,23 +322,50 @@ def render_single_campaign_matrix():
     import streamlit as st
 
     # ---------------------------------------------------------
-    # 🏷️ BILINGUAL SALE STORY NORMALIZATION FUNCTION
+    # 🏷️ ENHANCED BILINGUAL SALE STORY NORMALIZATION FUNCTION
     # ---------------------------------------------------------
     def normalize_sale_story(val):
+        # 1. Re-label blanks / nulls / missing / uncategorized to "no badge"
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() in ["nan", "none", "uncategorized / standard", "uncategorized"]:
             return "no badge"
         
         s = str(val).strip()
         
-        s_clean = re.sub(r'^(ÉCONOMISEZ|ÉCONOMISER|ECONOMISEZ|ÉCONOMISE)\s*', 'SAVE ', s, flags=re.IGNORECASE).strip()
+        # 2. Handle "X% de rabais" or "X % de rabais" -> "SAVE X%"
+        m_pct_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*%\s*de\s*rabais', s, flags=re.IGNORECASE)
+        if m_pct_de_rabais:
+            return f"SAVE {m_pct_de_rabais.group(1)}%"
+            
+        # 3. Handle "X $ de rabais" or "X$ de rabais" -> "SAVE $X"
+        m_dollar_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*\$\s*de\s*rabais', s, flags=re.IGNORECASE)
+        if m_dollar_de_rabais:
+            return f"SAVE ${m_dollar_de_rabais.group(1)}"
+
+        # 4. Handle "Rabais de X%" / "Rabais de X $"
+        m_rabais_pct = re.match(r'^rabais\s+de\s+(\d+(?:\.\d+)?)\s*%', s, flags=re.IGNORECASE)
+        if m_rabais_pct:
+            return f"SAVE {m_rabais_pct.group(1)}%"
+
+        m_rabais_dollar = re.match(r'^rabais\s+de\s+(\d+(?:\.\d+)?)\s*\$', s, flags=re.IGNORECASE)
+        if m_rabais_dollar:
+            return f"SAVE ${m_rabais_dollar.group(1)}"
+
+        # 5. Handle "En solde" / "On Sale" / "Solde" -> "ON SALE"
+        if s.lower() in ["en solde", "on sale", "solde"]:
+            return "ON SALE"
+
+        # 6. Standardize French prefix terms (ÉCONOMISEZ, LIQUIDATION, AUBAINE)
+        s_clean = re.sub(r'^(ÉCONOMISEZ|ÉCONOMISER|ECONOMISEZ|ÉCONOMISE|RABAIS DE|RABAIS)\s*', 'SAVE ', s, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(LIQUIDATION)\s*', 'CLEARANCE ', s_clean, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(AUBAINE)\s*', 'HOT DEAL ', s_clean, flags=re.IGNORECASE).strip()
-        s_clean = re.sub(r'^(SOLDE|RABAIS)\s*', 'SALE ', s_clean, flags=re.IGNORECASE).strip()
         
+        # 7. Standardize dollar formatting: "SAVE 50 $" -> "SAVE $50"
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*\$', r'SAVE $\1', s_clean, flags=re.IGNORECASE)
+        
+        # 8. Standardize percentage formatting: "SAVE 20 %" -> "SAVE 20%"
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*%', r'SAVE \1%', s_clean, flags=re.IGNORECASE)
         
-        if s_clean.upper() == "SAVE":
+        if s_clean.upper() in ["SAVE", "ÉCONOMISEZ"]:
             return "SAVE"
             
         return s_clean

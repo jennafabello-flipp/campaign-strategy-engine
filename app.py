@@ -368,7 +368,7 @@ def render_single_campaign_matrix():
         return s_clean
 
     # ---------------------------------------------------------
-    # 🖼️ MARKETING BANNER NAME SCRUBBER & CONSOLIDATOR
+    # 🖼️ MARKETING BANNER SCRUBBER & TTMR % ENGINE
     # ---------------------------------------------------------
     def clean_and_group_creative_assets(df_creative):
         if df_creative.empty:
@@ -397,14 +397,25 @@ def render_single_campaign_matrix():
         if 'Page' not in df_cr.columns:
             df_cr['Page'] = 1
 
+        # Fallback for TTMs column if missing in marketing banner export
+        if 'TTMs' not in df_cr.columns:
+            df_cr['TTMs'] = 0
+
+        # Group by Clean Name & Page
         cr_grouped = df_cr.groupby(['Clean_Name', 'Page'], observed=False).agg(
             Views=('Views', 'sum'),
-            Clicks=('Clicks', 'sum')
+            Clicks=('Clicks', 'sum'),
+            TTMs=('TTMs', 'sum')
         ).reset_index()
 
         cr_grouped.rename(columns={'Clean_Name': 'Name'}, inplace=True)
-        cr_grouped['Asset CTR'] = np.where(cr_grouped['Views'] > 0, cr_grouped['Clicks'] / cr_grouped['Views'], 0.0)
-        return cr_grouped.sort_values(by='Clicks', ascending=False)
+        
+        # Calculate TTMR % (Transfer to Merchant Rate) and Asset CTR %
+        cr_grouped['Asset TTMR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['TTMs'] / cr_grouped['Views'], 0.0)
+        cr_grouped['Asset CTR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['Clicks'] / cr_grouped['Views'], 0.0)
+        
+        # Primary sort by TTMs (conversion volume) then Clicks
+        return cr_grouped.sort_values(by=['TTMs', 'Clicks'], ascending=False)
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
@@ -808,16 +819,36 @@ def render_single_campaign_matrix():
         st.write("---")
         st.subheader("🏷️ Brand Performance & Marketing Placements")
         b_col, c_col = st.columns(2)
+        
         with b_col:
             st.markdown("**Top Brand Momentum**")
-            st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
-                'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
-                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
-            }), use_container_width=True, hide_index=True)
+            st.dataframe(
+                brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']]
+                .sort_values(by='Clicks', ascending=False)
+                .head(15)
+                .style.format({
+                    'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                    'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+                }), 
+                use_container_width=True, 
+                hide_index=True
+            )
+            
         with c_col:
-            st.markdown("**Consolidated Marketing Assets**")
+            st.markdown("**Consolidated Marketing Banners (Ranked by TTMR)**")
             if not cr_agg.empty:
-                st.dataframe(cr_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+                st.dataframe(
+                    cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']]
+                    .style.format({
+                        'Views': '{:,.0f}', 
+                        'Clicks': '{:,.0f}', 
+                        'TTMs': '{:,.0f}', 
+                        'Asset TTMR %': '{:.2%}',
+                        'Asset CTR %': '{:.2%}'
+                    }), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
 
         # ---------------------------------------------------------
         # 💰 PRICING, DISCOUNT & SALE STORY BAND ANALYSIS

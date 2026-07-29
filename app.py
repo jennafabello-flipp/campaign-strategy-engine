@@ -771,7 +771,7 @@ def render_single_campaign_matrix():
                 st.info("⚠️ No L3 taxonomy column containing data was detected in the file.")
 
         st.write("---")
-        st.subheader("🏬 Holistic Brand Affinity & Marketing Summary")
+        st.subheader("🏷️ Brand & Marketing Performance")
         b_col, c_col = st.columns(2)
         with b_col:
             st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({

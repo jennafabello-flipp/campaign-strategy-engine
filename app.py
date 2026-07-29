@@ -325,23 +325,22 @@ def render_single_campaign_matrix():
     # 🏷️ ENHANCED BILINGUAL SALE STORY NORMALIZATION FUNCTION
     # ---------------------------------------------------------
     def normalize_sale_story(val):
-        # 1. Re-label blanks / nulls / missing / uncategorized to "no badge"
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() in ["nan", "none", "uncategorized / standard", "uncategorized"]:
             return "no badge"
         
         s = str(val).strip()
         
-        # 2. Handle "X% de rabais" or "X % de rabais" -> "SAVE X%"
+        # 1. "X% de rabais" -> "SAVE X%"
         m_pct_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*%\s*de\s*rabais', s, flags=re.IGNORECASE)
         if m_pct_de_rabais:
             return f"SAVE {m_pct_de_rabais.group(1)}%"
             
-        # 3. Handle "X $ de rabais" or "X$ de rabais" -> "SAVE $X"
+        # 2. "X $ de rabais" -> "SAVE $X"
         m_dollar_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*\$\s*de\s*rabais', s, flags=re.IGNORECASE)
         if m_dollar_de_rabais:
             return f"SAVE ${m_dollar_de_rabais.group(1)}"
 
-        # 4. Handle "Rabais de X%" / "Rabais de X $"
+        # 3. "Rabais de X%" / "Rabais de X $"
         m_rabais_pct = re.match(r'^rabais\s+de\s+(\d+(?:\.\d+)?)\s*%', s, flags=re.IGNORECASE)
         if m_rabais_pct:
             return f"SAVE {m_rabais_pct.group(1)}%"
@@ -350,25 +349,62 @@ def render_single_campaign_matrix():
         if m_rabais_dollar:
             return f"SAVE ${m_rabais_dollar.group(1)}"
 
-        # 5. Handle "En solde" / "On Sale" / "Solde" -> "ON SALE"
+        # 4. "En solde" / "On Sale"
         if s.lower() in ["en solde", "on sale", "solde"]:
             return "ON SALE"
 
-        # 6. Standardize French prefix terms (ÉCONOMISEZ, LIQUIDATION, AUBAINE)
+        # 5. French prefix replacements
         s_clean = re.sub(r'^(ÉCONOMISEZ|ÉCONOMISER|ECONOMISEZ|ÉCONOMISE|RABAIS DE|RABAIS)\s*', 'SAVE ', s, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(LIQUIDATION)\s*', 'CLEARANCE ', s_clean, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(AUBAINE)\s*', 'HOT DEAL ', s_clean, flags=re.IGNORECASE).strip()
         
-        # 7. Standardize dollar formatting: "SAVE 50 $" -> "SAVE $50"
+        # 6. Currency / percentage spacing
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*\$', r'SAVE $\1', s_clean, flags=re.IGNORECASE)
-        
-        # 8. Standardize percentage formatting: "SAVE 20 %" -> "SAVE 20%"
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*%', r'SAVE \1%', s_clean, flags=re.IGNORECASE)
         
         if s_clean.upper() in ["SAVE", "ÉCONOMISEZ"]:
             return "SAVE"
             
         return s_clean
+
+    # ---------------------------------------------------------
+    # 🖼️ MARKETING BANNER NAME SCRUBBER & CONSOLIDATOR
+    # ---------------------------------------------------------
+    def clean_and_group_creative_assets(df_creative):
+        if df_creative.empty:
+            return df_creative
+
+        df_cr = df_creative.copy()
+
+        def scrub_creative_name(val):
+            if pd.isna(val):
+                return "Unassigned Asset"
+            s = str(val).strip()
+            
+            # Strip trailing instance numbers like -6, -22, -18
+            s_clean = re.sub(r'-\d+$', '', s)
+            
+            # Normalize EN/FR language tags
+            s_clean = re.sub(r'_(EN|FR)_', '_', s_clean, flags=re.IGNORECASE)
+            s_clean = re.sub(r'_(EN|FR)$', '', s_clean, flags=re.IGNORECASE)
+            s_clean = re.sub(r'^(EN|FR)_', '', s_clean, flags=re.IGNORECASE)
+            s_clean = re.sub(r'_{2,}', '_', s_clean).strip('_')
+            
+            return s_clean
+
+        df_cr['Clean_Name'] = df_cr['Name'].apply(scrub_creative_name)
+
+        if 'Page' not in df_cr.columns:
+            df_cr['Page'] = 1
+
+        cr_grouped = df_cr.groupby(['Clean_Name', 'Page'], observed=False).agg(
+            Views=('Views', 'sum'),
+            Clicks=('Clicks', 'sum')
+        ).reset_index()
+
+        cr_grouped.rename(columns={'Clean_Name': 'Name'}, inplace=True)
+        cr_grouped['Asset CTR'] = np.where(cr_grouped['Views'] > 0, cr_grouped['Clicks'] / cr_grouped['Views'], 0.0)
+        return cr_grouped.sort_values(by='Clicks', ascending=False)
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
@@ -524,7 +560,6 @@ def render_single_campaign_matrix():
                 if df_temp.empty:
                     return pd.DataFrame()
 
-                # Apply English/French unification
                 df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(lambda x: normalize_text_bilingual(x, bilingual_category_map))
 
                 c_agg = df_temp.groupby('Parsed_Cat').agg(
@@ -551,9 +586,9 @@ def render_single_campaign_matrix():
             brand_agg['List Share %'] = brand_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             brand_agg['TTM Share %'] = brand_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
             
+            # --- PROCESS CREATIVE ASSETS WITH AUTO-SCRUBBER ---
             if not df_creative.empty:
-                cr_agg = df_creative.groupby('Name').agg(Page=('Page','max'), Views=('Views','sum'), Clicks=('Clicks','sum')).reset_index()
-                cr_agg['Asset CTR'] = np.where(cr_agg['Views'] > 0, cr_agg['Clicks'] / cr_agg['Views'], 0)
+                cr_agg = clean_and_group_creative_assets(df_creative)
                 
             df_prod_bands = df_prod.copy()
             
@@ -595,7 +630,7 @@ def render_single_campaign_matrix():
             d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
             d_agg = d_agg[d_agg['Items'] > 0]
 
-            # Build Sale Story DataFrame (Bilingual Mapping + "no badge" Blanks)
+            # Build Sale Story DataFrame
             sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout', 'Sale Story Callout']
             col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
 
@@ -771,16 +806,18 @@ def render_single_campaign_matrix():
                 st.info("⚠️ No L3 taxonomy column containing data was detected in the file.")
 
         st.write("---")
-        st.subheader("🏷️ Brand & Marketing Performance")
+        st.subheader("🏷️ Brand Performance & Marketing Placements")
         b_col, c_col = st.columns(2)
         with b_col:
+            st.markdown("**Top Brand Momentum**")
             st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
                 'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
                 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
             }), use_container_width=True, hide_index=True)
         with c_col:
-            if not df_creative.empty:
-                st.dataframe(cr_agg.sort_values(by='Clicks', ascending=False).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+            st.markdown("**Consolidated Marketing Assets**")
+            if not cr_agg.empty:
+                st.dataframe(cr_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Asset CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
         # 💰 PRICING, DISCOUNT & SALE STORY BAND ANALYSIS
@@ -800,7 +837,7 @@ def render_single_campaign_matrix():
             st.markdown("**Discount Band Performance**")
             st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
             
-        # --- NEW SALE STORY PERFORMANCE TABLE ---
+        # --- SALE STORY PERFORMANCE TABLE ---
         if col_sale_story and not s_agg_sorted.empty:
             st.write("")
             st.markdown(f"**🏷️ Sale Story & Promotional Hook Performance** *(Mapped via `{col_sale_story}`)*")
@@ -811,7 +848,7 @@ def render_single_campaign_matrix():
             )
 
         # ---------------------------------------------------------
-        # 📊 RESTORED SIDE-BY-SIDE PRICE BAND CHARTS
+        # 📊 SIDE-BY-SIDE PRICE BAND CHARTS
         # ---------------------------------------------------------
         st.write("")
         col_pb1, col_pb2 = st.columns(2)

@@ -325,22 +325,23 @@ def render_single_campaign_matrix():
     # 🏷️ ENHANCED BILINGUAL SALE STORY NORMALIZATION FUNCTION
     # ---------------------------------------------------------
     def normalize_sale_story(val):
+        # 1. Re-label blanks / nulls / missing / uncategorized to "no badge"
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() in ["nan", "none", "uncategorized / standard", "uncategorized"]:
             return "no badge"
         
         s = str(val).strip()
         
-        # 1. "X% de rabais" -> "SAVE X%"
+        # 2. Handle "X% de rabais" or "X % de rabais" -> "SAVE X%"
         m_pct_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*%\s*de\s*rabais', s, flags=re.IGNORECASE)
         if m_pct_de_rabais:
             return f"SAVE {m_pct_de_rabais.group(1)}%"
             
-        # 2. "X $ de rabais" -> "SAVE $X"
+        # 3. Handle "X $ de rabais" or "X$ de rabais" -> "SAVE $X"
         m_dollar_de_rabais = re.match(r'^(\d+(?:\.\d+)?)\s*\$\s*de\s*rabais', s, flags=re.IGNORECASE)
         if m_dollar_de_rabais:
             return f"SAVE ${m_dollar_de_rabais.group(1)}"
 
-        # 3. "Rabais de X%" / "Rabais de X $"
+        # 4. Handle "Rabais de X%" / "Rabais de X $"
         m_rabais_pct = re.match(r'^rabais\s+de\s+(\d+(?:\.\d+)?)\s*%', s, flags=re.IGNORECASE)
         if m_rabais_pct:
             return f"SAVE {m_rabais_pct.group(1)}%"
@@ -349,16 +350,16 @@ def render_single_campaign_matrix():
         if m_rabais_dollar:
             return f"SAVE ${m_rabais_dollar.group(1)}"
 
-        # 4. "En solde" / "On Sale"
+        # 5. Handle "En solde" / "On Sale" / "Solde" -> "ON SALE"
         if s.lower() in ["en solde", "on sale", "solde"]:
             return "ON SALE"
 
-        # 5. French prefix replacements
+        # 6. Standardize French prefix terms
         s_clean = re.sub(r'^(ÉCONOMISEZ|ÉCONOMISER|ECONOMISEZ|ÉCONOMISE|RABAIS DE|RABAIS)\s*', 'SAVE ', s, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(LIQUIDATION)\s*', 'CLEARANCE ', s_clean, flags=re.IGNORECASE).strip()
         s_clean = re.sub(r'^(AUBAINE)\s*', 'HOT DEAL ', s_clean, flags=re.IGNORECASE).strip()
         
-        # 6. Currency / percentage spacing
+        # 7. Currency & percentage spacing
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*\$', r'SAVE $\1', s_clean, flags=re.IGNORECASE)
         s_clean = re.sub(r'SAVE\s+(\d+(?:\.\d+)?)\s*%', r'SAVE \1%', s_clean, flags=re.IGNORECASE)
         
@@ -397,11 +398,9 @@ def render_single_campaign_matrix():
         if 'Page' not in df_cr.columns:
             df_cr['Page'] = 1
 
-        # Fallback for TTMs column if missing in marketing banner export
         if 'TTMs' not in df_cr.columns:
             df_cr['TTMs'] = 0
 
-        # Group by Clean Name & Page
         cr_grouped = df_cr.groupby(['Clean_Name', 'Page'], observed=False).agg(
             Views=('Views', 'sum'),
             Clicks=('Clicks', 'sum'),
@@ -410,11 +409,11 @@ def render_single_campaign_matrix():
 
         cr_grouped.rename(columns={'Clean_Name': 'Name'}, inplace=True)
         
-        # Calculate TTMR % (Transfer to Merchant Rate) and Asset CTR %
+        # Calculate TTMR % (Transfer to Merchant Rate) & Asset CTR %
         cr_grouped['Asset TTMR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['TTMs'] / cr_grouped['Views'], 0.0)
         cr_grouped['Asset CTR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['Clicks'] / cr_grouped['Views'], 0.0)
         
-        # Primary sort by TTMs (conversion volume) then Clicks
+        # Primary sort by TTMs volume then Clicks
         return cr_grouped.sort_values(by=['TTMs', 'Clicks'], ascending=False)
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
@@ -597,7 +596,7 @@ def render_single_campaign_matrix():
             brand_agg['List Share %'] = brand_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             brand_agg['TTM Share %'] = brand_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
             
-            # --- PROCESS CREATIVE ASSETS WITH AUTO-SCRUBBER ---
+            # --- PROCESS CREATIVE ASSETS WITH SCRUBBER & TTMR ENGINE ---
             if not df_creative.empty:
                 cr_agg = clean_and_group_creative_assets(df_creative)
                 
@@ -678,7 +677,7 @@ def render_single_campaign_matrix():
             if not cat_l2_agg.empty: cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
             if not cat_l3_agg.empty: cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
             brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
-            if not cr_agg.empty: cr_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Creative Assets', index=False)
+            if not cr_agg.empty: cr_agg.to_excel(writer, sheet_name='Creative Assets', index=False)
             p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
             d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
             if col_sale_story and not s_agg_sorted.empty: s_agg_sorted.to_excel(writer, sheet_name='Sale Story Performance', index=False)
@@ -819,23 +818,14 @@ def render_single_campaign_matrix():
         st.write("---")
         st.subheader("🏷️ Brand Performance & Marketing Placements")
         b_col, c_col = st.columns(2)
-        
         with b_col:
             st.markdown("**Top Brand Momentum**")
-            st.dataframe(
-                brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']]
-                .sort_values(by='Clicks', ascending=False)
-                .head(15)
-                .style.format({
-                    'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
-                    'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
-                }), 
-                use_container_width=True, 
-                hide_index=True
-            )
-            
+            st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
+                'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+            }), use_container_width=True, hide_index=True)
         with c_col:
-            st.markdown("**Consolidated Marketing Banners (Ranked by TTMR)**")
+            st.markdown("**Consolidated Marketing Banners (Ranked by TTMR %)**")
             if not cr_agg.empty:
                 st.dataframe(
                     cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']]

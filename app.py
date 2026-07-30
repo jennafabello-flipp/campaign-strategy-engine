@@ -1261,39 +1261,7 @@ def render_head_to_head_variance():
         # ---------------------------------------------------------
         # 🛒 2. MERCHANDISE & MARKETING LINK PROCESSING
         # ---------------------------------------------------------
-        if base_merch_file and new_merch_file:
-            st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
-
-            def load_merch_data(file):
-                df = load_generic_data(file)
-                if df is None or df.empty:
-                    return pd.DataFrame()
-                
-                rename_map = {
-                    'Total Item Views': 'Views',
-                    'Item Views': 'Views',
-                    'Total Item Clicks': 'Clicks',
-                    'Item Clicks': 'Clicks',
-                    'Total Transfer to Merchant (TTMs)': 'TTMs',
-                    'Item TTMs': 'TTMs',
-                    'Total TTMs': 'TTMs'
-                }
-                df.rename(columns=rename_map, inplace=True)
-                return df
-
-            df_base = load_merch_data(base_merch_file)
-            df_new = load_merch_data(new_merch_file)
-
-            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else ('Merchandise Name' if 'Merchandise Name' in df_base.columns else 'Name')
-
-            def get_group_cols(df, main_col):
-                cols = [main_col]
-                if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
-                if 'Page Position' in df.columns: cols.append('Page Position')
-                return cols
-
-            # Safely check if dataframes were successfully created
-            if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+        if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
                 st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
 
@@ -1345,46 +1313,23 @@ def render_head_to_head_variance():
                 b_item_ctr = (b_item_cl / b_item_v) if b_item_v > 0 else 0.0
                 n_item_ctr = (n_item_cl / n_item_v) if n_item_v > 0 else 0.0
 
+                b_item_ttmr = (b_item_ttm / b_item_v) if b_item_v > 0 else 0.0
+                n_item_ttmr = (n_item_ttm / n_item_v) if n_item_v > 0 else 0.0
+
+                b_link_ctr = (b_link_cl / b_link_v) if b_link_v > 0 else 0.0
+                n_link_ctr = (n_link_cl / n_link_v) if n_link_v > 0 else 0.0
+
                 b_link_ttmr = (b_link_ttm / b_link_v) if b_link_v > 0 else 0.0
                 n_link_ttmr = (n_link_ttm / n_link_v) if n_link_v > 0 else 0.0
 
                 b_tot_ctr = (b_tot_cl / b_tot_v) if b_tot_v > 0 else 0.0
                 n_tot_ctr = (n_tot_cl / n_tot_v) if n_tot_v > 0 else 0.0
 
+                b_tot_ttmr = (b_tot_ttm / b_tot_v) if b_tot_v > 0 else 0.0
+                n_tot_ttmr = (n_tot_ttm / n_tot_v) if n_tot_v > 0 else 0.0
+
                 def get_variance(new_val, base_val):
                     return (new_val - base_val) / base_val if base_val > 0 else 0.0
-
-                # Summary Table Generation
-                summary_data = {
-                    "Asset Category": [
-                        "🛒 Products (Items)", "🛒 Products (Items)", "🛒 Products (Items)",
-                        "🔗 Marketing Links", "🔗 Marketing Links", "🔗 Marketing Links",
-                        "🌐 Combined Total", "🌐 Combined Total", "🌐 Combined Total"
-                    ],
-                    "Metric": [
-                        "Product Views", "Product Clicks (CTR %)", "Product TTMs (TTMR %)",
-                        "Link Views", "Link Clicks (CTR %)", "Link TTMs (TTMR %)",
-                        "Total Views", "Total Clicks (CTR %)", "Total TTMs (TTMR %)"
-                    ],
-                    "Historical (Base)": [
-                        f"{b_item_v:,.0f}", f"{b_item_cl:,.0f} ({b_item_ctr:.2%})", f"{b_item_ttm:,.0f} ({(b_item_ttm/b_item_v if b_item_v>0 else 0):.2%})",
-                        f"{b_link_v:,.0f}", f"{b_link_cl:,.0f} ({(b_link_cl/b_link_v if b_link_v>0 else 0):.2%})", f"{b_link_ttm:,.0f} ({b_link_ttmr:.2%})",
-                        f"{b_tot_v:,.0f}", f"{b_tot_cl:,.0f} ({b_tot_ctr:.2%})", f"{b_tot_ttm:,.0f} ({(b_tot_ttm/b_tot_v if b_tot_v>0 else 0):.2%})"
-                    ],
-                    "Current (New)": [
-                        f"{n_item_v:,.0f}", f"{n_item_cl:,.0f} ({n_item_ctr:.2%})", f"{n_item_ttm:,.0f} ({(n_item_ttm/n_item_v if n_item_v>0 else 0):.2%})",
-                        f"{n_link_v:,.0f}", f"{n_link_cl:,.0f} ({(n_link_cl/n_link_v if n_link_v>0 else 0):.2%})", f"{n_link_ttm:,.0f} ({n_link_ttmr:.2%})",
-                        f"{n_tot_v:,.0f}", f"{n_tot_cl:,.0f} ({n_tot_ctr:.2%})", f"{n_tot_ttm:,.0f} ({(n_tot_ttm/n_tot_v if n_tot_v>0 else 0):.2%})"
-                    ],
-                    "Variance %": [
-                        f"{get_variance(n_item_v, b_item_v):+.2%}", f"{get_variance(n_item_cl, b_item_cl):+.2%}", f"{get_variance(n_item_ttm, b_item_ttm):+.2%}",
-                        f"{get_variance(n_link_v, b_link_v):+.2%}", f"{get_variance(n_link_cl, b_link_cl):+.2%}", f"{get_variance(n_link_ttm, b_link_ttm):+.2%}",
-                        f"{get_variance(n_tot_v, b_tot_v):+.2%}", f"{get_variance(n_tot_cl, b_tot_cl):+.2%}", f"{get_variance(n_tot_ttm, b_tot_ttm):+.2%}"
-                    ]
-                }
-
-                df_summary = pd.DataFrame(summary_data)
-                export_sheets["Merch_Macro_Comparison"] = df_summary
 
                 def color_variance_cells(val):
                     if isinstance(val, str):
@@ -1394,8 +1339,27 @@ def render_head_to_head_variance():
                             return 'color: #fd7e14; font-weight: bold;'
                     return ''
 
+                # --- SINGLE UNIFIED BACK-TO-BACK HORIZONTAL TABLE ---
+                summary_data = {
+                    "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
+                    "Product Views": [f"{b_item_v:,.0f}", f"{n_item_v:,.0f}", f"{get_variance(n_item_v, b_item_v):+.2%}"],
+                    "Product Clicks": [f"{b_item_cl:,.0f}", f"{n_item_cl:,.0f}", f"{get_variance(n_item_cl, b_item_cl):+.2%}"],
+                    "Product CTR %": [f"{b_item_ctr:.2%}", f"{n_item_ctr:.2%}", f"{get_variance(n_item_ctr, b_item_ctr):+.2%}"],
+                    "Product TTMs": [f"{b_item_ttm:,.0f}", f"{n_item_ttm:,.0f}", f"{get_variance(n_item_ttm, b_item_ttm):+.2%}"],
+                    "Link Views": [f"{b_link_v:,.0f}", f"{n_link_v:,.0f}", f"{get_variance(n_link_v, b_link_v):+.2%}"],
+                    "Link Clicks": [f"{b_link_cl:,.0f}", f"{n_link_cl:,.0f}", f"{get_variance(n_link_cl, b_link_cl):+.2%}"],
+                    "Link TTMR %": [f"{b_link_ttmr:.2%}", f"{n_link_ttmr:.2%}", f"{get_variance(n_link_ttmr, b_link_ttmr):+.2%}"],
+                    "Total Views": [f"{b_tot_v:,.0f}", f"{n_tot_v:,.0f}", f"{get_variance(n_tot_v, b_tot_v):+.2%}"],
+                    "Total Clicks": [f"{b_tot_cl:,.0f}", f"{n_tot_cl:,.0f}", f"{get_variance(n_tot_cl, b_tot_cl):+.2%}"],
+                    "Global CTR %": [f"{b_tot_ctr:.2%}", f"{n_tot_ctr:.2%}", f"{get_variance(n_tot_ctr, b_tot_ctr):+.2%}"],
+                    "Total TTMs": [f"{b_tot_ttm:,.0f}", f"{n_tot_ttm:,.0f}", f"{get_variance(n_tot_ttm, b_tot_ttm):+.2%}"]
+                }
+
+                df_summary = pd.DataFrame(summary_data)
+                export_sheets["Merch_Macro_Comparison"] = df_summary
+
                 st.dataframe(df_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
-                st.caption("ℹ️ **Products (Items)** represent SKU listings. **Marketing Links** represent category banners, CTAs, and external navigation links.")
+                st.caption("ℹ️ **Products** represent SKU listings. **Links** represent marketing banners and navigation CTAs. **Combined** represents total campaign interaction.")
 
             # ---------------------------------------------------------
             # 📖 PAGE-BY-PAGE HEATMAP & DROP-OFF ANALYSIS

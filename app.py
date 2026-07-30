@@ -1428,87 +1428,78 @@ def render_head_to_head_variance():
                 )
 
             # ---------------------------------------------------------
-            # 🏷️ CATEGORY PERFORMANCE VARIANCE
-            # ---------------------------------------------------------
-            cat_col_base = resolve_category_column(df_base)
-            cat_col_new = resolve_category_column(df_new)
-
-            if cat_col_base and cat_col_new:
-                st.write("---")
-                st.subheader(f"🏷️ Category Performance Variance (via `{cat_col_base}`)")
-
-                df_base[cat_col_base] = df_base[cat_col_base].fillna("Uncategorized").astype(str).str.strip()
-                df_new[cat_col_new] = df_new[cat_col_new].fillna("Uncategorized").astype(str).str.strip()
-
-                base_cat_agg = df_base.groupby(cat_col_base).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                base_cat_agg['Base CTR %'] = np.where(base_cat_agg['Views'] > 0, base_cat_agg['Clicks'] / base_cat_agg['Views'], 0)
-                tot_b_clicks = base_cat_agg['Clicks'].sum()
-                base_cat_agg['Base Click Share %'] = base_cat_agg['Clicks'] / tot_b_clicks if tot_b_clicks > 0 else 0
-                base_cat_agg.rename(columns={cat_col_base: 'Category', 'Clicks': 'Base Clicks'}, inplace=True)
-
-                new_cat_agg = df_new.groupby(cat_col_new).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                new_cat_agg['New CTR %'] = np.where(new_cat_agg['Views'] > 0, new_cat_agg['Clicks'] / new_cat_agg['Views'], 0)
-                tot_n_clicks = new_cat_agg['Clicks'].sum()
-                new_cat_agg['New Click Share %'] = new_cat_agg['Clicks'] / tot_n_clicks if tot_n_clicks > 0 else 0
-                new_cat_agg.rename(columns={cat_col_new: 'Category', 'Clicks': 'New Clicks'}, inplace=True)
-
-                cat_merged = pd.merge(base_cat_agg[['Category', 'Base Clicks', 'Base CTR %', 'Base Click Share %']],
-                                      new_cat_agg[['Category', 'New Clicks', 'New CTR %', 'New Click Share %']],
-                                      on='Category', how='outer').fillna(0)
-
-                cat_merged['Click Share Shift'] = cat_merged['New Click Share %'] - cat_merged['Base Click Share %']
-                cat_merged = cat_merged.sort_values(by='New Clicks', ascending=False)
-
-                export_sheets["Category_Performance"] = cat_merged
-
-                st.dataframe(
-                    cat_merged.style.format({
-                        'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}', 'Base Click Share %': '{:.2%}',
-                        'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}', 'New Click Share %': '{:.2%}',
-                        'Click Share Shift': '{:+.2%}'
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            # ---------------------------------------------------------
             # 🔀 MERCHANDISING MOVEMENT ANALYSIS (Repeat vs New vs Dropped)
             # ---------------------------------------------------------
-            if item_col in df_base.columns and item_col in df_new.columns:
+            has_sku_base = 'SKU' in df_base.columns and df_base['SKU'].dropna().astype(str).str.strip().ne('').any()
+            has_sku_new = 'SKU' in df_new.columns and df_new['SKU'].dropna().astype(str).str.strip().ne('').any()
+
+            # Determine key column (SKU preferred, fallback to item_col)
+            match_key = 'SKU' if (has_sku_base and has_sku_new) else item_col
+
+            if match_key in df_base.columns and match_key in df_new.columns:
                 st.write("---")
-                st.subheader("🔀 Merchandising Assortment Movement Analysis")
+                st.subheader(f"🔀 Merchandising Assortment Movement Analysis *(Matched via `{match_key}`)*")
 
-                base_items_set = set(df_base[item_col].dropna().unique())
-                new_items_set = set(df_new[item_col].dropna().unique())
+                # Filter datasets to Products Only (exclude blanks/banners if matching on SKU)
+                if match_key == 'SKU':
+                    df_b_prod = df_base[df_base['SKU'].notna() & df_base['SKU'].astype(str).str.strip().ne('') & (df_base['SKU'].astype(str).str.strip().str.lower() != 'nan')].copy()
+                    df_n_prod = df_new[df_new['SKU'].notna() & df_new['SKU'].astype(str).str.strip().ne('') & (df_new['SKU'].astype(str).str.strip().str.lower() != 'nan')].copy()
+                else:
+                    df_b_prod = df_base.copy()
+                    df_n_prod = df_new.copy()
 
-                repeat_items = base_items_set.intersection(new_items_set)
-                added_items = new_items_set - base_items_set
-                dropped_items = base_items_set - new_items_set
+                base_keys = set(df_b_prod[match_key].dropna().astype(str).str.strip().unique())
+                new_keys = set(df_n_prod[match_key].dropna().astype(str).str.strip().unique())
+
+                repeat_keys = base_keys.intersection(new_keys)
+                added_keys = new_keys - base_keys
+                dropped_keys = base_keys - new_keys
 
                 mc1, mc2, mc3 = st.columns(3)
-                mc1.metric("🔄 Repeat Featured Items", f"{len(repeat_items):,}")
-                mc2.metric("🆕 New Item Additions", f"{len(added_items):,}")
-                mc3.metric("❌ Dropped Items", f"{len(dropped_items):,}")
+                mc1.metric("🔄 Repeat Featured Items", f"{len(repeat_keys):,}")
+                mc2.metric("🆕 New Item Additions", f"{len(added_keys):,}")
+                mc3.metric("❌ Dropped Items", f"{len(dropped_keys):,}")
 
-                if len(repeat_items) > 0:
-                    df_base_rep = df_base[df_base[item_col].isin(repeat_items)].groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                # --- TOP REPEAT ITEMS COMPARISON ---
+                if len(repeat_keys) > 0:
+                    group_cols_base = ['SKU', item_col] if ('SKU' in df_b_prod.columns and item_col != 'SKU') else [match_key]
+                    group_cols_new = ['SKU', item_col] if ('SKU' in df_n_prod.columns and item_col != 'SKU') else [match_key]
+
+                    df_base_rep = df_b_prod[df_b_prod[match_key].astype(str).str.strip().isin(repeat_keys)].groupby(group_cols_base).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     df_base_rep['Base CTR %'] = np.where(df_base_rep['Views'] > 0, df_base_rep['Clicks'] / df_base_rep['Views'], 0)
 
-                    df_new_rep = df_new[df_new[item_col].isin(repeat_items)].groupby(item_col).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    df_new_rep = df_n_prod[df_n_prod[match_key].astype(str).str.strip().isin(repeat_keys)].groupby(group_cols_new).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
                     df_new_rep['New CTR %'] = np.where(df_new_rep['Views'] > 0, df_new_rep['Clicks'] / df_new_rep['Views'], 0)
 
-                    rep_merged = pd.merge(df_base_rep[[item_col, 'Clicks', 'Base CTR %']],
-                                          df_new_rep[[item_col, 'Clicks', 'New CTR %']],
-                                          on=item_col, suffixes=(' Base', ' New'))
-                    
+                    rep_merged = pd.merge(
+                        df_base_rep,
+                        df_new_rep,
+                        on=match_key,
+                        suffixes=(' Base', ' New')
+                    )
+
+                    # Standardize column naming for repeat table
+                    if item_col in rep_merged.columns + ' New':
+                        name_col_rep = item_col + ' New' if (item_col + ' New') in rep_merged.columns else (item_col + ' Base' if (item_col + ' Base') in rep_merged.columns else item_col)
+                        rep_merged.rename(columns={name_col_rep: 'Merchandise Name'}, inplace=True)
+                    elif item_col in rep_merged.columns:
+                        rep_merged.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+
                     rep_merged['CTR % Variance'] = np.where(rep_merged['Base CTR %'] > 0, (rep_merged['New CTR %'] - rep_merged['Base CTR %']) / rep_merged['Base CTR %'], 0)
-                    rep_merged = rep_merged.sort_values(by='Clicks New', ascending=False).head(10)
-                    
-                    export_sheets["Repeat_Items_Comparison"] = rep_merged
+                    rep_merged = rep_merged.sort_values(by='Clicks New', ascending=False)
+
+                    # Reorder display columns
+                    disp_cols_rep = []
+                    if 'SKU' in rep_merged.columns: disp_cols_rep.append('SKU')
+                    if 'Merchandise Name' in rep_merged.columns: disp_cols_rep.append('Merchandise Name')
+                    disp_cols_rep.extend(['Clicks Base', 'Base CTR %', 'Clicks New', 'New CTR %', 'CTR % Variance'])
+
+                    final_rep_table = rep_merged[[c for c in disp_cols_rep if c in rep_merged.columns]].head(15)
+                    export_sheets["Repeat_Items_Comparison"] = final_rep_table
 
                     st.markdown("**Top Repeat Items Performance Comparison**")
                     st.dataframe(
-                        rep_merged.style.format({
+                        final_rep_table.style.format({
                             'Clicks Base': '{:,.0f}', 'Base CTR %': '{:.2%}',
                             'Clicks New': '{:,.0f}', 'New CTR %': '{:.2%}',
                             'CTR % Variance': '{:+.2%}'
@@ -1517,6 +1508,25 @@ def render_head_to_head_variance():
                         hide_index=True
                     )
 
+                # --- DRILL-DOWN EXPANDERS FOR NEW AND DROPPED SKUS ---
+                col_exp1, col_exp2 = st.columns(2)
+                with col_exp1:
+                    with st.expander(f"🆕 **View New Item Additions ({len(added_keys):,})**"):
+                        df_added = df_n_prod[df_n_prod[match_key].astype(str).str.strip().isin(added_keys)].copy()
+                        grp_add = ['SKU', item_col] if ('SKU' in df_added.columns and item_col != 'SKU') else [match_key]
+                        df_added_agg = df_added.groupby(grp_add).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        df_added_agg['CTR %'] = np.where(df_added_agg['Views'] > 0, df_added_agg['Clicks'] / df_added_agg['Views'], 0)
+                        df_added_agg = df_added_agg.sort_values(by='Clicks', ascending=False)
+                        st.dataframe(df_added_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+
+                with col_exp2:
+                    with st.expander(f"❌ **View Dropped Items ({len(dropped_keys):,})**"):
+                        df_dropped = df_b_prod[df_b_prod[match_key].astype(str).str.strip().isin(dropped_keys)].copy()
+                        grp_drop = ['SKU', item_col] if ('SKU' in df_dropped.columns and item_col != 'SKU') else [match_key]
+                        df_dropped_agg = df_dropped.groupby(grp_drop).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                        df_dropped_agg['CTR %'] = np.where(df_dropped_agg['Views'] > 0, df_dropped_agg['Clicks'] / df_dropped_agg['Views'], 0)
+                        df_dropped_agg = df_dropped_agg.sort_values(by='Clicks', ascending=False)
+                        st.dataframe(df_dropped_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
             # --- FRONT COVER PERFORMANCE ---
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 df_base_cover = df_base[df_base['Page Position'] == '1'].copy()

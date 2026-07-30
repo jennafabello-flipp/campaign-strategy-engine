@@ -1028,7 +1028,7 @@ def render_head_to_head_variance():
     import streamlit as st
 
     st.write("---")
-    st.header("秤 Head-to-Head Campaign Comparison")
+    st.header("🗂️ Head-to-Head Campaign Comparison")
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate period-over-period variance and side-by-side performance tables.")
 
     # Dual-upload for Merchandise Metrics

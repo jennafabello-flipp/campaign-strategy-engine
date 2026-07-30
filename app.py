@@ -37,90 +37,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# ⚡ MULTI-FILE BATCH PARSER & COMBINER (RAM Optimized)
-# ==============================================================================
-@st.cache_data(show_spinner="⚡ Batch processing and combining files...")
-def parse_and_combine_multiple_files(uploaded_files):
-    """
-    Sequentially reads multiple uploaded CSV or XLSX files, normalizes columns,
-    reduces RAM footprint per file, and concatenates them into one DataFrame.
-    """
-    if not uploaded_files:
-        return pd.DataFrame()
-
-    processed_chunks = []
-    
-    target_columns = [
-        'SKU', 'Clean_Name', 'Merchandise Name', 'Name', 'Item Name',
-        'Total Item Views', 'Item Views', 'Views',
-        'Total Item Clicks', 'Item Clicks', 'Clicks',
-        'Total Transfer to Merchant (TTMs)', 'Item TTMs', 'Total TTMs', 'TTMs',
-        'Page Position', 'Page', 'Display Type', 'Category', 'Retailer Category', 'Department',
-        'Flyer Run Name', 'Flyer Run ID', 'Brand', 'Daily Available From', 'Weekly Date',
-        'Total Original Price', 'Original Price', 'Total Current Price', 'Current Price',
-        'Custom ID 1', 'Custom ID 2', 'Custom ID 3', 'Google Category L1', 'Google Category L2',
-        'Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description'
-    ]
-
-    for file in uploaded_files:
-        try:
-            file_bytes = file.getvalue()
-            buffer = io.BytesIO(file_bytes)
-            file_name = file.name.lower()
-
-            if file_name.endswith('.csv'):
-                preview = pd.read_csv(buffer, header=None, nrows=15)
-                header_row = 0
-                for idx, row in preview.iterrows():
-                    row_vals = [str(val).strip() for val in row.values if pd.notna(val)]
-                    if any(k in row_vals for k in ['Weekly Date', 'Daily Date', 'Flyer Run Name', 'Page Position', 'SKU', 'Name', 'Merchandise Name']):
-                        header_row = idx
-                        break
-
-                buffer.seek(0)
-                cols_in_file = pd.read_csv(buffer, header=header_row, nrows=1).columns.astype(str).str.strip()
-                use_cols = [c for c in cols_in_file if c in target_columns or any(t in c.lower() for t in ['views', 'clicks', 'ttm', 'sku', 'name', 'page', 'category', 'price'])]
-
-                buffer.seek(0)
-                df = pd.read_csv(buffer, header=header_row, usecols=use_cols if use_cols else None, low_memory=False)
-            else:
-                df = pd.read_excel(buffer)
-
-            df.columns = [str(c).strip() for c in df.columns]
-
-            # Standardize core metric columns
-            rename_map = {
-                'Total Item Views': 'Views', 'Item Views': 'Views',
-                'Total Item Clicks': 'Clicks', 'Item Clicks': 'Clicks',
-                'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs',
-                'Total Clippings': 'Clips'
-            }
-            df.rename(columns=rename_map, inplace=True)
-
-            # Downcast metric columns to save memory
-            for col in ['Views', 'Clicks', 'Clips', 'TTMs']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int32')
-                else:
-                    df[col] = 0
-
-            processed_chunks.append(df)
-            
-            del file_bytes, buffer, df
-            gc.collect()
-
-        except Exception as e:
-            st.error(f"⚠️ Could not process file `{file.name}`: {str(e)}")
-
-    if processed_chunks:
-        combined_df = pd.concat(processed_chunks, ignore_index=True)
-        del processed_chunks
-        gc.collect()
-        return combined_df
-    
-    return pd.DataFrame()
-
-# ==============================================================================
 # 🧹 ARMORED AUTO-SCRUBBER ENGINE
 # ==============================================================================
 def clean_bilingual_suffix(name_str):
@@ -176,6 +92,34 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
     except Exception as e:
         st.error(f"Error scrubbing file setup: {str(e)}")
         return None, None, None
+
+def parse_and_combine_multiple_files(uploaded_files):
+    """
+    Sequentially reads and scrubs multiple uploaded files,
+    preserving exact column mappings before concatenating.
+    """
+    if not uploaded_files:
+        return pd.DataFrame(), None
+
+    combined_dfs = []
+    master_mapping = None
+
+    for file in uploaded_files:
+        try:
+            df_clean, mapping, _ = scrub_and_load_excel(file)
+            if df_clean is not None and not df_clean.empty:
+                combined_dfs.append(df_clean)
+                if master_mapping is None:
+                    master_mapping = mapping
+            gc.collect()
+        except Exception as e:
+            st.error(f"⚠️ Could not process file `{file.name}`: {str(e)}")
+
+    if combined_dfs:
+        full_df = pd.concat(combined_dfs, ignore_index=True)
+        return full_df, master_mapping
+    
+    return pd.DataFrame(), None
 
 def process_metrics(df, m):
     df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
@@ -514,31 +458,10 @@ def render_single_campaign_matrix():
         return mapping_dict.get(s.lower(), s)
 
     if merch_files:
-        df_clean = parse_and_combine_multiple_files(merch_files)
+        df_clean, mapping = parse_and_combine_multiple_files(merch_files)
 
-        if not df_clean.empty:
-            m = {
-                'sku': 'SKU' if 'SKU' in df_clean.columns else None,
-                'name': 'Name' if 'Name' in df_clean.columns else ('Merchandise Name' if 'Merchandise Name' in df_clean.columns else None),
-                'date': 'Daily Available From' if 'Daily Available From' in df_clean.columns else None,
-                'run_id': 'Flyer Run ID' if 'Flyer Run ID' in df_clean.columns else None,
-                'run_name': 'Flyer Run Name' if 'Flyer Run Name' in df_clean.columns else None,
-                'display_type': 'Display Type' if 'Display Type' in df_clean.columns else None,
-                'page': 'Page Position' if 'Page Position' in df_clean.columns else ('Page' if 'Page' in df_clean.columns else None),
-                'brand': 'Brand' if 'Brand' in df_clean.columns else None,
-                'orig_price': 'Total Original Price' if 'Total Original Price' in df_clean.columns else None,
-                'curr_price': 'Total Current Price' if 'Total Current Price' in df_clean.columns else None,
-                'url': 'URL' if 'URL' in df_clean.columns else None,
-                'c1': 'Custom ID 1' if 'Custom ID 1' in df_clean.columns else None,
-                'c2': 'Custom ID 2' if 'Custom ID 2' in df_clean.columns else None,
-                'c3': 'Custom ID 3' if 'Custom ID 3' in df_clean.columns else None,
-                'ret_cat': 'Retailer Category' if 'Retailer Category' in df_clean.columns else None,
-                'goo_l1': 'Google Category L1' if 'Google Category L1' in df_clean.columns else None,
-                'goo_l2': 'Google Category L2' if 'Google Category L2' in df_clean.columns else None,
-                'goo_l3': 'Google Category L3' if 'Google Category L3' in df_clean.columns else None,
-                'views': 'Views', 'clicks': 'Clicks', 'clips': 'Clips' if 'Clips' in df_clean.columns else None, 'ttms': 'TTMs'
-            }
-            df_prod, df_creative, global_totals = process_metrics(df_clean, m)
+        if df_clean is not None and not df_clean.empty and mapping is not None:
+            df_prod, df_creative, global_totals = process_metrics(df_clean, mapping)
             merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(df_clean)
             
             pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
@@ -995,11 +918,11 @@ def render_head_to_head_variance():
     if st.session_state.run_h2h:
         export_sheets = {}
 
-        df_base = parse_and_combine_multiple_files([base_merch_file]) if base_merch_file else pd.DataFrame()
-        df_new = parse_and_combine_multiple_files([new_merch_file]) if new_merch_file else pd.DataFrame()
+        df_base, _ = parse_and_combine_multiple_files([base_merch_file]) if base_merch_file else (pd.DataFrame(), None)
+        df_new, _ = parse_and_combine_multiple_files([new_merch_file]) if new_merch_file else (pd.DataFrame(), None)
         
-        f_base = parse_and_combine_multiple_files([base_funnel_file]) if base_funnel_file else pd.DataFrame()
-        f_new = parse_and_combine_multiple_files([new_funnel_file]) if new_funnel_file else pd.DataFrame()
+        f_base, _ = parse_and_combine_multiple_files([base_funnel_file]) if base_funnel_file else (pd.DataFrame(), None)
+        f_new, _ = parse_and_combine_multiple_files([new_funnel_file]) if new_funnel_file else (pd.DataFrame(), None)
 
         # 1. FUNNEL ANALYSIS
         if not f_base.empty and not f_new.empty:

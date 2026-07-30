@@ -1257,71 +1257,89 @@ def render_head_to_head_variance():
 
             st.dataframe(df_funnel_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
 
-        # ---------------------------------------------------------
-        # 🛒 2. MERCHANDISE PROCESSING (BELOW FUNNEL)
-        # ---------------------------------------------------------
-        if base_merch_file and new_merch_file:
-            st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
-
-            def load_merch_data(file):
-                df = load_generic_data(file)
-                rename_map = {
-                    'Total Item Views': 'Views',
-                    'Item Views': 'Views',
-                    'Total Item Clicks': 'Clicks',
-                    'Item Clicks': 'Clicks',
-                    'Total Transfer to Merchant (TTMs)': 'TTMs',
-                    'Item TTMs': 'TTMs',
-                    'Total TTMs': 'TTMs'
-                }
-                df.rename(columns=rename_map, inplace=True)
-                return df
-
-            df_base = load_merch_data(base_merch_file)
-            df_new = load_merch_data(new_merch_file)
-            
-            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else 'Merchandise Name'
-
-            def get_group_cols(df, main_col):
-                cols = [main_col]
-                if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
-                if 'Page Position' in df.columns: cols.append('Page Position')
-                return cols
-
-            # --- MACRO SUMMARY TABLE ---
+        # --- MACRO SUMMARY TABLE (ITEMS + LINKS) ---
             if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
-                st.subheader("📈 Macro Item-Level Performance Comparison")
+                st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
 
-                b_views = df_base['Views'].sum()
-                b_clicks = df_base['Clicks'].sum()
-                b_ctr = b_clicks / b_views if b_views > 0 else 0
-                b_ttms = df_base['TTMs'].sum() if 'TTMs' in df_base.columns else 0
-                b_ttmr = b_ttms / b_views if b_views > 0 else 0
+                # Helper function to split dataset into Products (Items) vs Marketing Links
+                def split_items_and_links(df):
+                    if 'SKU' in df.columns:
+                        has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().lower() != 'nan')
+                        items_df = df[has_sku].copy()
+                        links_df = df[~has_sku].copy()
+                    elif 'Display Type' in df.columns:
+                        is_link = df['Display Type'].astype(str).str.contains('Banner|Header|Creative|Hero|Link', case=False, na=False)
+                        items_df = df[~is_link].copy()
+                        links_df = df[is_link].copy()
+                    else:
+                        items_df = df.copy()
+                        links_df = pd.DataFrame()
+                    return items_df, links_df
 
-                n_views = df_new['Views'].sum()
-                n_clicks = df_new['Clicks'].sum()
-                n_ctr = n_clicks / n_views if n_views > 0 else 0
-                n_ttms = df_new['TTMs'].sum() if 'TTMs' in df_new.columns else 0
-                n_ttmr = n_ttms / n_views if n_views > 0 else 0
+                b_items, b_links = split_items_and_links(df_base)
+                n_items, n_links = split_items_and_links(df_new)
+
+                # Base Calculations
+                b_item_v, b_item_cl = b_items['Views'].sum() if not b_items.empty else 0, b_items['Clicks'].sum() if not b_items.empty else 0
+                b_item_ttm = b_items['TTMs'].sum() if not b_items.empty and 'TTMs' in b_items.columns else 0
+                
+                b_link_v, b_link_cl = b_links['Views'].sum() if not b_links.empty else 0, b_links['Clicks'].sum() if not b_links.empty else 0
+                b_link_ttm = b_links['TTMs'].sum() if not b_links.empty and 'TTMs' in b_links.columns else 0
+
+                # Current Calculations
+                n_item_v, n_item_cl = n_items['Views'].sum() if not n_items.empty else 0, n_items['Clicks'].sum() if not n_items.empty else 0
+                n_item_ttm = n_items['TTMs'].sum() if not n_items.empty and 'TTMs' in n_items.columns else 0
+
+                n_link_v, n_link_cl = n_links['Views'].sum() if not n_links.empty else 0, n_links['Clicks'].sum() if not n_links.empty else 0
+                n_link_ttm = n_links['TTMs'].sum() if not n_links.empty and 'TTMs' in n_links.columns else 0
+
+                # Total Combined Calculations
+                b_tot_v, b_tot_cl, b_tot_ttm = b_item_v + b_link_v, b_item_cl + b_link_cl, b_item_ttm + b_link_ttm
+                n_tot_v, n_tot_cl, n_tot_ttm = n_item_v + n_link_v, n_item_cl + n_link_cl, n_item_ttm + n_link_ttm
+
+                # Rates
+                b_item_ctr = (b_item_cl / b_item_v) if b_item_v > 0 else 0.0
+                n_item_ctr = (n_item_cl / n_item_v) if n_item_v > 0 else 0.0
+
+                b_link_ttmr = (b_link_ttm / b_link_v) if b_link_v > 0 else 0.0
+                n_link_ttmr = (n_link_ttm / n_link_v) if n_link_v > 0 else 0.0
+
+                b_tot_ctr = (b_tot_cl / b_tot_v) if b_tot_v > 0 else 0.0
+                n_tot_ctr = (n_tot_cl / n_tot_v) if n_tot_v > 0 else 0.0
 
                 def get_variance(new_val, base_val):
-                    return (new_val - base_val) / base_val if base_val > 0 else 0
+                    return (new_val - base_val) / base_val if base_val > 0 else 0.0
 
-                y_views = get_variance(n_views, b_views)
-                y_clicks = get_variance(n_clicks, b_clicks)
-                y_ctr = get_variance(n_ctr, b_ctr)
-                y_ttms = get_variance(n_ttms, b_ttms)
-                y_ttmr = get_variance(n_ttmr, b_ttmr)
-
+                # Construct Summary DataFrame incorporating both Items and Links
                 summary_data = {
-                    "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
-                    "Total Item Views": [f"{b_views:,.0f}", f"{n_views:,.0f}", f"{y_views:+.2%}"],
-                    "Item Clicks": [f"{b_clicks:,.0f}", f"{n_clicks:,.0f}", f"{y_clicks:+.2%}"],
-                    "Item CTR %": [f"{b_ctr:.2%}", f"{n_ctr:.2%}", f"{y_ctr:+.2%}"],
-                    "Item TTMs": [f"{b_ttms:,.0f}", f"{n_ttms:,.0f}", f"{y_ttms:+.2%}"],
-                    "Item TTMR %": [f"{b_ttmr:.2%}", f"{n_ttmr:.2%}", f"{y_ttmr:+.2%}"]
+                    "Asset Category": [
+                        "🛒 Products (Items)", "🛒 Products (Items)", "🛒 Products (Items)",
+                        "🔗 Marketing Links", "🔗 Marketing Links", "🔗 Marketing Links",
+                        "🌐 Combined Total", "🌐 Combined Total", "🌐 Combined Total"
+                    ],
+                    "Metric": [
+                        "Product Views", "Product Clicks (CTR %)", "Product TTMs (TTMR %)",
+                        "Link Views", "Link Clicks (CTR %)", "Link TTMs (TTMR %)",
+                        "Total Views", "Total Clicks (CTR %)", "Total TTMs (TTMR %)"
+                    ],
+                    "Historical (Base)": [
+                        f"{b_item_v:,.0f}", f"{b_item_cl:,.0f} ({b_item_ctr:.2%})", f"{b_item_ttm:,.0f} ({(b_item_ttm/b_item_v if b_item_v>0 else 0):.2%})",
+                        f"{b_link_v:,.0f}", f"{b_link_cl:,.0f} ({(b_link_cl/b_link_v if b_link_v>0 else 0):.2%})", f"{b_link_ttm:,.0f} ({b_link_ttmr:.2%})",
+                        f"{b_tot_v:,.0f}", f"{b_tot_cl:,.0f} ({b_tot_ctr:.2%})", f"{b_tot_ttm:,.0f} ({(b_tot_ttm/b_tot_v if b_tot_v>0 else 0):.2%})"
+                    ],
+                    "Current (New)": [
+                        f"{n_item_v:,.0f}", f"{n_item_cl:,.0f} ({n_item_ctr:.2%})", f"{n_item_ttm:,.0f} ({(n_item_ttm/n_item_v if n_item_v>0 else 0):.2%})",
+                        f"{n_link_v:,.0f}", f"{n_link_cl:,.0f} ({(n_link_cl/n_link_v if n_link_v>0 else 0):.2%})", f"{n_link_ttm:,.0f} ({n_link_ttmr:.2%})",
+                        f"{n_tot_v:,.0f}", f"{n_tot_cl:,.0f} ({n_tot_ctr:.2%})", f"{n_tot_ttm:,.0f} ({(n_tot_ttm/n_tot_v if n_tot_v>0 else 0):.2%})"
+                    ],
+                    "Variance %": [
+                        f"{get_variance(n_item_v, b_item_v):+.2%}", f"{get_variance(n_item_cl, b_item_cl):+.2%}", f"{get_variance(n_item_ttm, b_item_ttm):+.2%}",
+                        f"{get_variance(n_link_v, b_link_v):+.2%}", f"{get_variance(n_link_cl, b_link_cl):+.2%}", f"{get_variance(n_link_ttm, b_link_ttm):+.2%}",
+                        f"{get_variance(n_tot_v, b_tot_v):+.2%}", f"{get_variance(n_tot_cl, b_tot_cl):+.2%}", f"{get_variance(n_tot_ttm, b_tot_ttm):+.2%}"
+                    ]
                 }
+
                 df_summary = pd.DataFrame(summary_data)
                 export_sheets["Merch_Macro_Comparison"] = df_summary
 
@@ -1334,6 +1352,7 @@ def render_head_to_head_variance():
                     return ''
 
                 st.dataframe(df_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
+                st.caption("ℹ️ **Products (Items)** represent SKU listings. **Marketing Links** represent category banners, CTAs, and external navigation links.")
 
             # ---------------------------------------------------------
             # 📖 PAGE-BY-PAGE HEATMAP & DROP-OFF ANALYSIS

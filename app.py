@@ -1028,7 +1028,7 @@ def render_head_to_head_variance():
     import streamlit as st
 
     st.write("---")
-    st.header("🗂️ Head-to-Head Campaign Comparison")
+    st.header("⚖️ Head-to-Head Campaign Comparison")
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate period-over-period variance and side-by-side performance tables.")
 
     # Dual-upload for Merchandise Metrics
@@ -1049,13 +1049,12 @@ def render_head_to_head_variance():
     with col4:
         new_funnel_file = st.file_uploader("📤 Upload NEW Funnel Metrics", type=['csv', 'xlsx'], key="new_funnel")
 
-    # A button to run the comparison once files are dropped in
-    if st.button("🚀 Run Head-to-Head Analysis"):
-        
-        export_sheets = {}
-
-        # Universal Loader
-        def load_generic_data(file):
+    # Safe Loader Function
+    def safe_load_generic_data(file):
+        if file is None:
+            return pd.DataFrame()
+        try:
+            file.seek(0)
             if file.name.endswith('.csv'):
                 preview = pd.read_csv(file, header=None, nrows=15)
             else:
@@ -1068,6 +1067,7 @@ def render_head_to_head_variance():
                     header_row = idx
                     break
 
+            file.seek(0)
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file, header=header_row)
             else:
@@ -1075,48 +1075,44 @@ def render_head_to_head_variance():
             
             df.columns = df.columns.astype(str).str.strip()
             return df
+        except Exception as e:
+            st.error(f"⚠️ Could not read file `{file.name}`: {str(e)}")
+            return pd.DataFrame()
 
-        def get_campaign_info(df):
-            merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
-            runs = ", ".join(df['Flyer Run Name'].dropna().astype(str).unique()) if 'Flyer Run Name' in df.columns else "N/A"
-            
-            date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
-            if date_col and date_col in df.columns:
-                parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
-                if len(parsed_dates) > 0:
-                    start_date = parsed_dates.min().strftime('%Y-%m-%d')
-                    end_date = parsed_dates.max().strftime('%Y-%m-%d')
-                    date_str = f"{start_date} to {end_date}"
-                else:
-                    date_str = "N/A"
+    def safe_get_campaign_info(df):
+        if df.empty:
+            return "N/A", "N/A", "N/A"
+        merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
+        runs = ", ".join(df['Flyer Run Name'].dropna().astype(str).unique()) if 'Flyer Run Name' in df.columns else "N/A"
+        
+        date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
+        if date_col and date_col in df.columns:
+            parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+            if len(parsed_dates) > 0:
+                start_date = parsed_dates.min().strftime('%Y-%m-%d')
+                end_date = parsed_dates.max().strftime('%Y-%m-%d')
+                date_str = f"{start_date} to {end_date}"
             else:
                 date_str = "N/A"
-                
-            return merchant, runs, date_str
+        else:
+            date_str = "N/A"
+            
+        return merchant, runs, date_str
 
-        # 🔍 CATEGORY RESOLUTION FALLBACK SEQUENCE
-        def resolve_category_column(df):
-            tier1_cols = ['Custom ID', 'Custom Category', 'Custom_ID', 'Internal Category']
-            tier2_cols = ['Retailer Category', 'Category', 'Category Name', 'Department', 'Dept Name', 'Sub-Category', 'Merchandise Category']
-            tier3_cols = ['Google Category', 'Google Product Category', 'Google_Category', 'L1 Category', 'L2 Category']
+    # Run Analysis Trigger
+    if st.button("🚀 Run Head-to-Head Analysis"):
+        export_sheets = {}
 
-            for col in tier1_cols + tier2_cols + tier3_cols:
-                if col in df.columns:
-                    return col
-            return None
-
-        # ---------------------------------------------------------
         # 📌 CAMPAIGN OVERVIEW HEADER
-        # ---------------------------------------------------------
         primary_base = base_funnel_file or base_merch_file
         primary_new = new_funnel_file or new_merch_file
 
         if primary_base and primary_new:
-            df_info_base = load_generic_data(primary_base)
-            df_info_new = load_generic_data(primary_new)
+            df_info_base = safe_load_generic_data(primary_base)
+            df_info_new = safe_load_generic_data(primary_new)
 
-            m_base, r_base, d_base = get_campaign_info(df_info_base)
-            m_new, r_new, d_new = get_campaign_info(df_info_new)
+            m_base, r_base, d_base = safe_get_campaign_info(df_info_base)
+            m_new, r_new, d_new = safe_get_campaign_info(df_info_new)
 
             st.write("---")
             st.subheader("📋 Campaign Context & Overview")
@@ -1134,149 +1130,94 @@ def render_head_to_head_variance():
                 st.markdown(f"* **Flyer Run Name(s):** `{r_new}`")
                 st.markdown(f"* **Active Dates:** `{d_new}`")
 
-        # ---------------------------------------------------------
-        # 📖 PERFORMANCE RATES GLOSSARY
-        # ---------------------------------------------------------
-        st.write("---")
-        with st.expander("📖 **Performance Rates & Metrics Glossary (Click to Expand)**"):
-            st.markdown("""
-            * **Open Rate %** = `Flyer Opens ÷ Impressions`  
-              *Measures the percentage of ad impressions that resulted in a user opening the digital flyer.*
-            * **Engagement Rate %** = `Unique Engaged Visits ÷ Flyer Opens`  
-              *Measures the percentage of flyer opens where users actively interacted with the content.*
-            * **Click-To-Open Rate (CTOR %)** = `Total Item Clicks ÷ Flyer Opens`  
-              *Measures content effectiveness by tracking the volume of product/banner clicks generated per open.*
-            * **Intent-to-Buy Rate %** = `Shopping List Adds ÷ Unique Engagements`  
-              *Measures buyer intent by tracking how many engaged shoppers clipped items to their list.*
-            * **Item CTR %** = `Item Clicks ÷ Item Views`  
-              *Measures individual product performance based on click likelihood relative to views.*
-            * **Transfer-to-Merchant Rate (TTMR %)** = `Item TTMs ÷ Item Views`  
-              *Measures e-commerce referral drive by tracking direct outbound transfers per view.*
-            """)
-
-        # ---------------------------------------------------------
-        # 📊 1. FUNNEL PROCESSING & CONVERSION RATIOS
-        # ---------------------------------------------------------
+        # 📊 1. FUNNEL PROCESSING
         if base_funnel_file and new_funnel_file:
             st.success("Both Funnel files loaded! Calculating Macro Funnel Performance...")
 
-            f_base = load_generic_data(base_funnel_file)
-            f_new = load_generic_data(new_funnel_file)
+            f_base = safe_load_generic_data(base_funnel_file)
+            f_new = safe_load_generic_data(new_funnel_file)
 
-            base_runs = f_base['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_base.columns else []
-            new_runs = f_new['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_new.columns else []
+            if not f_base.empty and not f_new.empty:
+                base_runs = f_base['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_base.columns else []
+                new_runs = f_new['Flyer Run Name'].dropna().unique() if 'Flyer Run Name' in f_new.columns else []
 
-            if len(new_runs) > 1 and len(base_runs) == 1:
-                target_run = base_runs[0]
-                target_run_2026 = target_run.replace('2025', '2026')
-                if target_run_2026 in new_runs:
-                    f_new = f_new[f_new['Flyer Run Name'] == target_run_2026].copy()
-                elif target_run in new_runs:
-                    f_new = f_new[f_new['Flyer Run Name'] == target_run].copy()
-                else:
-                    golive_runs = [r for r in new_runs if 'Go-Live' in str(r) or 'May' in str(r)]
-                    if golive_runs:
-                        f_new = f_new[f_new['Flyer Run Name'] == golive_runs[0]].copy()
+                if len(new_runs) > 1 and len(base_runs) == 1:
+                    target_run = base_runs[0]
+                    target_run_2026 = target_run.replace('2025', '2026')
+                    if target_run_2026 in new_runs:
+                        f_new = f_new[f_new['Flyer Run Name'] == target_run_2026].copy()
+                    elif target_run in new_runs:
+                        f_new = f_new[f_new['Flyer Run Name'] == target_run].copy()
 
-            def extract_funnel_metrics_by_name(df):
-                def safe_sum(col_names):
-                    for col in col_names:
-                        if col in df.columns:
-                            return pd.to_numeric(df[col], errors='coerce').sum()
-                    return 0
+                def extract_funnel_metrics(df):
+                    def safe_sum(col_names):
+                        for col in col_names:
+                            if col in df.columns:
+                                return pd.to_numeric(df[col], errors='coerce').sum()
+                        return 0
 
-                impressions = safe_sum(['Total Flyer Impressions', 'Impressions'])
-                opens = safe_sum(['Total Opens', 'Flyer Opens'])
-                uevs = safe_sum(['Total Unique Engaged Visits (UEVs)', 'Unique Engagements'])
-                clicks = safe_sum(['Total Item Clicks', 'Total Flyer Clicks', 'Item Clicks'])
-                ttms = safe_sum(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Site', 'TTMs'])
-                adds = safe_sum(['Total Clippings', 'Total Shopping List Adds', 'Clippings'])
-                
-                tot_time_sec = safe_sum(['Total Time On Flyer (Sec)', 'Total Time Spent (Sec)'])
-                tot_sessions = safe_sum(['Total Flyer Sessions', 'Flyer Sessions'])
+                    impressions = safe_sum(['Total Flyer Impressions', 'Impressions'])
+                    opens = safe_sum(['Total Opens', 'Flyer Opens'])
+                    uevs = safe_sum(['Total Unique Engaged Visits (UEVs)', 'Unique Engagements'])
+                    clicks = safe_sum(['Total Item Clicks', 'Total Flyer Clicks', 'Item Clicks'])
+                    ttms = safe_sum(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Site', 'TTMs'])
+                    adds = safe_sum(['Total Clippings', 'Total Shopping List Adds', 'Clippings'])
+                    tot_time_sec = safe_sum(['Total Time On Flyer (Sec)', 'Total Time Spent (Sec)'])
+                    tot_sessions = safe_sum(['Total Flyer Sessions', 'Flyer Sessions'])
 
-                avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
+                    avg_time_sec = (tot_time_sec / tot_sessions) if tot_sessions > 0 else 0
+                    open_rate = (opens / impressions) if impressions > 0 else 0
+                    eng_rate = (uevs / opens) if opens > 0 else 0
+                    ctor = (clicks / opens) if opens > 0 else 0
+                    intent_rate = (adds / uevs) if uevs > 0 else 0
 
-                open_rate = (opens / impressions) if impressions > 0 else 0
-                eng_rate = (uevs / opens) if opens > 0 else 0
-                ctor = (clicks / opens) if opens > 0 else 0
-                intent_rate = (adds / uevs) if uevs > 0 else 0
+                    formatted_time = f"{(avg_time_sec / 60):.2f} min" if avg_time_sec >= 60 else f"{avg_time_sec:.1f} sec"
 
-                if avg_time_sec >= 60:
-                    formatted_time = f"{(avg_time_sec / 60):.2f} min"
-                else:
-                    formatted_time = f"{avg_time_sec:.1f} sec"
+                    return {
+                        "Impressions": impressions, "Flyer Opens": opens, "Open Rate %": open_rate,
+                        "Unique Engagements": uevs, "Engagement Rate %": eng_rate, "Total Flyer Clicks": clicks,
+                        "CTOR %": ctor, "Transfer to Site": ttms, "Shopping List Adds": adds,
+                        "Intent Rate %": intent_rate, "Raw Avg Time Sec": avg_time_sec, "Formatted Time": formatted_time
+                    }
 
-                return {
-                    "Impressions": impressions,
-                    "Flyer Opens": opens,
-                    "Open Rate %": open_rate,
-                    "Unique Engagements": uevs,
-                    "Engagement Rate %": eng_rate,
-                    "Total Flyer Clicks": clicks,
-                    "CTOR %": ctor,
-                    "Transfer to Site": ttms,
-                    "Shopping List Adds": adds,
-                    "Intent Rate %": intent_rate,
-                    "Raw Avg Time Sec": avg_time_sec,
-                    "Formatted Time": formatted_time
+                b_m = extract_funnel_metrics(f_base)
+                n_m = extract_funnel_metrics(f_new)
+
+                def calc_var(new_v, base_v):
+                    return (new_v - base_v) / base_v if base_v > 0 else 0.0
+
+                st.subheader("🚀 Top-of-Funnel Macro Performance Comparison")
+                funnel_data = {
+                    "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
+                    "Impressions": [f"{b_m['Impressions']:,.0f}", f"{n_m['Impressions']:,.0f}", f"{calc_var(n_m['Impressions'], b_m['Impressions']):+.2%}"],
+                    "Flyer Opens": [f"{b_m['Flyer Opens']:,.0f}", f"{n_m['Flyer Opens']:,.0f}", f"{calc_var(n_m['Flyer Opens'], b_m['Flyer Opens']):+.2%}"],
+                    "Open Rate %": [f"{b_m['Open Rate %']:.2%}", f"{n_m['Open Rate %']:.2%}", f"{calc_var(n_m['Open Rate %'], b_m['Open Rate %']):+.2%}"],
+                    "Unique Engagements": [f"{b_m['Unique Engagements']:,.0f}", f"{n_m['Unique Engagements']:,.0f}", f"{calc_var(n_m['Unique Engagements'], b_m['Unique Engagements']):+.2%}"],
+                    "Engagement Rate %": [f"{b_m['Engagement Rate %']:.2%}", f"{n_m['Engagement Rate %']:.2%}", f"{calc_var(n_m['Engagement Rate %'], b_m['Engagement Rate %']):+.2%}"],
+                    "Total Flyer Clicks": [f"{b_m['Total Flyer Clicks']:,.0f}", f"{n_m['Total Flyer Clicks']:,.0f}", f"{calc_var(n_m['Total Flyer Clicks'], b_m['Total Flyer Clicks']):+.2%}"],
+                    "CTOR %": [f"{b_m['CTOR %']:.2%}", f"{n_m['CTOR %']:.2%}", f"{calc_var(n_m['CTOR %'], b_m['CTOR %']):+.2%}"],
+                    "Transfer to Site": [f"{b_m['Transfer to Site']:,.0f}", f"{n_m['Transfer to Site']:,.0f}", f"{calc_var(n_m['Transfer to Site'], b_m['Transfer to Site']):+.2%}"],
+                    "Shopping List Adds": [f"{b_m['Shopping List Adds']:,.0f}", f"{n_m['Shopping List Adds']:,.0f}", f"{calc_var(n_m['Shopping List Adds'], b_m['Shopping List Adds']):+.2%}"],
+                    "Intent Rate %": [f"{b_m['Intent Rate %']:.2%}", f"{n_m['Intent Rate %']:.2%}", f"{calc_var(n_m['Intent Rate %'], b_m['Intent Rate %']):+.2%}"],
+                    "Avg Time Spent": [b_m['Formatted Time'], n_m['Formatted Time'], f"{calc_var(n_m['Raw Avg Time Sec'], b_m['Raw Avg Time Sec']):+.2%}"]
                 }
+                df_funnel_summary = pd.DataFrame(funnel_data)
+                export_sheets["Funnel_Macro_Comparison"] = df_funnel_summary
+                st.dataframe(df_funnel_summary, use_container_width=True, hide_index=True)
 
-            b_metrics = extract_funnel_metrics_by_name(f_base)
-            n_metrics = extract_funnel_metrics_by_name(f_new)
-
-            def get_variance(new_val, base_val):
-                return (new_val - base_val) / base_val if base_val > 0 else 0
-
-            st.subheader("🚀 Top-of-Funnel Macro Performance Comparison")
-            
-            funnel_data = {
-                "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
-                "Impressions": [f"{b_metrics['Impressions']:,.0f}", f"{n_metrics['Impressions']:,.0f}", f"{get_variance(n_metrics['Impressions'], b_metrics['Impressions']):+.2%}"],
-                "Flyer Opens": [f"{b_metrics['Flyer Opens']:,.0f}", f"{n_metrics['Flyer Opens']:,.0f}", f"{get_variance(n_metrics['Flyer Opens'], b_metrics['Flyer Opens']):+.2%}"],
-                "Open Rate %": [f"{b_metrics['Open Rate %']:.2%}", f"{n_metrics['Open Rate %']:.2%}", f"{get_variance(n_metrics['Open Rate %'], b_metrics['Open Rate %']):+.2%}"],
-                "Unique Engagements": [f"{b_metrics['Unique Engagements']:,.0f}", f"{n_metrics['Unique Engagements']:,.0f}", f"{get_variance(n_metrics['Unique Engagements'], b_metrics['Unique Engagements']):+.2%}"],
-                "Engagement Rate %": [f"{b_metrics['Engagement Rate %']:.2%}", f"{n_metrics['Engagement Rate %']:.2%}", f"{get_variance(n_metrics['Engagement Rate %'], b_metrics['Engagement Rate %']):+.2%}"],
-                "Total Flyer Clicks": [f"{b_metrics['Total Flyer Clicks']:,.0f}", f"{n_metrics['Total Flyer Clicks']:,.0f}", f"{get_variance(n_metrics['Total Flyer Clicks'], b_metrics['Total Flyer Clicks']):+.2%}"],
-                "CTOR %": [f"{b_metrics['CTOR %']:.2%}", f"{n_metrics['CTOR %']:.2%}", f"{get_variance(n_metrics['CTOR %'], b_metrics['CTOR %']):+.2%}"],
-                "Transfer to Site": [f"{b_metrics['Transfer to Site']:,.0f}", f"{n_metrics['Transfer to Site']:,.0f}", f"{get_variance(n_metrics['Transfer to Site'], b_metrics['Transfer to Site']):+.2%}"],
-                "Shopping List Adds": [f"{b_metrics['Shopping List Adds']:,.0f}", f"{n_metrics['Shopping List Adds']:,.0f}", f"{get_variance(n_metrics['Shopping List Adds'], b_metrics['Shopping List Adds']):+.2%}"],
-                "Intent Rate %": [f"{b_metrics['Intent Rate %']:.2%}", f"{n_metrics['Intent Rate %']:.2%}", f"{get_variance(n_metrics['Intent Rate %'], b_metrics['Intent Rate %']):+.2%}"],
-                "Avg Time Spent": [b_metrics['Formatted Time'], n_metrics['Formatted Time'], f"{get_variance(n_metrics['Raw Avg Time Sec'], b_metrics['Raw Avg Time Sec']):+.2%}"]
-            }
-            
-            df_funnel_summary = pd.DataFrame(funnel_data)
-            export_sheets["Funnel_Macro_Comparison"] = df_funnel_summary
-
-            def color_variance_cells(val):
-                if isinstance(val, str):
-                    if val.startswith('+') and val != '+0.00%':
-                        return 'color: #28a745; font-weight: bold;'
-                    elif val.startswith('-'):
-                        return 'color: #fd7e14; font-weight: bold;'
-                return ''
-
-            st.dataframe(df_funnel_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
-
-        # ---------------------------------------------------------
-        # 🛒 2. MERCHANDISE & MARKETING LINK PROCESSING
-        # ---------------------------------------------------------
+        # 🛒 2. MERCHANDISE PROCESSING
         if base_merch_file and new_merch_file:
             st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
 
             def load_merch_data(file):
-                df = load_generic_data(file)
-                if df is None or df.empty:
+                df = safe_load_generic_data(file)
+                if df.empty:
                     return pd.DataFrame()
                 
                 rename_map = {
-                    'Total Item Views': 'Views',
-                    'Item Views': 'Views',
-                    'Total Item Clicks': 'Clicks',
-                    'Item Clicks': 'Clicks',
-                    'Total Transfer to Merchant (TTMs)': 'TTMs',
-                    'Item TTMs': 'TTMs',
-                    'Total TTMs': 'TTMs'
+                    'Total Item Views': 'Views', 'Item Views': 'Views',
+                    'Total Item Clicks': 'Clicks', 'Item Clicks': 'Clicks',
+                    'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs'
                 }
                 df.rename(columns=rename_map, inplace=True)
                 return df
@@ -1284,444 +1225,192 @@ def render_head_to_head_variance():
             df_base = load_merch_data(base_merch_file)
             df_new = load_merch_data(new_merch_file)
 
-            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else ('Merchandise Name' if 'Merchandise Name' in df_base.columns else 'Name')
+            if not df_base.empty and not df_new.empty:
+                item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else ('Merchandise Name' if 'Merchandise Name' in df_base.columns else 'Name')
 
-            def get_group_cols(df, main_col):
-                cols = [main_col]
-                if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
-                if 'Page Position' in df.columns: cols.append('Page Position')
-                return cols
+                def get_group_cols(df, main_c):
+                    cols = [main_c] if main_c in df.columns else []
+                    if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
+                    if 'Page Position' in df.columns: cols.append('Page Position')
+                    return cols
 
-            # Safely check if dataframes were successfully created
-            if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
-                st.write("---")
-                st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
+                # MACRO SINGLE BACK-TO-BACK HORIZONTAL TABLE
+                if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+                    st.write("---")
+                    st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
 
-                # Helper function to split dataset into Products (Items) vs Marketing Links
-                def split_items_and_links(df):
-                    if df is None or df.empty:
-                        return pd.DataFrame(), pd.DataFrame()
+                    def split_items_and_links(df):
+                        if df.empty: return pd.DataFrame(), pd.DataFrame()
+                        if 'SKU' in df.columns:
+                            has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().str.lower() != 'nan')
+                            return df[has_sku].copy(), df[~has_sku].copy()
+                        elif 'Display Type' in df.columns:
+                            is_link = df['Display Type'].astype(str).str.contains('Banner|Header|Creative|Hero|Link', case=False, na=False)
+                            return df[~is_link].copy(), df[is_link].copy()
+                        return df.copy(), pd.DataFrame()
 
-                    if 'SKU' in df.columns:
-                        has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().str.lower() != 'nan')
-                        items_df = df[has_sku].copy()
-                        links_df = df[~has_sku].copy()
-                    elif 'Display Type' in df.columns:
-                        is_link = df['Display Type'].astype(str).str.contains('Banner|Header|Creative|Hero|Link', case=False, na=False)
-                        items_df = df[~is_link].copy()
-                        links_df = df[is_link].copy()
-                    else:
-                        items_df = df.copy()
-                        links_df = pd.DataFrame()
-                        
-                    return items_df, links_df
+                    b_items, b_links = split_items_and_links(df_base)
+                    n_items, n_links = split_items_and_links(df_new)
 
-                b_items, b_links = split_items_and_links(df_base)
-                n_items, n_links = split_items_and_links(df_new)
+                    b_item_v = b_items['Views'].sum() if not b_items.empty else 0
+                    b_item_cl = b_items['Clicks'].sum() if not b_items.empty else 0
+                    b_item_ttm = b_items['TTMs'].sum() if not b_items.empty and 'TTMs' in b_items.columns else 0
+                    
+                    b_link_v = b_links['Views'].sum() if not b_links.empty else 0
+                    b_link_cl = b_links['Clicks'].sum() if not b_links.empty else 0
+                    b_link_ttm = b_links['TTMs'].sum() if not b_links.empty and 'TTMs' in b_links.columns else 0
 
-                # Base Calculations
-                b_item_v = b_items['Views'].sum() if not b_items.empty else 0
-                b_item_cl = b_items['Clicks'].sum() if not b_items.empty else 0
-                b_item_ttm = b_items['TTMs'].sum() if not b_items.empty and 'TTMs' in b_items.columns else 0
-                
-                b_link_v = b_links['Views'].sum() if not b_links.empty else 0
-                b_link_cl = b_links['Clicks'].sum() if not b_links.empty else 0
-                b_link_ttm = b_links['TTMs'].sum() if not b_links.empty and 'TTMs' in b_links.columns else 0
+                    n_item_v = n_items['Views'].sum() if not n_items.empty else 0
+                    n_item_cl = n_items['Clicks'].sum() if not n_items.empty else 0
+                    n_item_ttm = n_items['TTMs'].sum() if not n_items.empty and 'TTMs' in n_items.columns else 0
 
-                # Current Calculations
-                n_item_v = n_items['Views'].sum() if not n_items.empty else 0
-                n_item_cl = n_items['Clicks'].sum() if not n_items.empty else 0
-                n_item_ttm = n_items['TTMs'].sum() if not n_items.empty and 'TTMs' in n_items.columns else 0
+                    n_link_v = n_links['Views'].sum() if not n_links.empty else 0
+                    n_link_cl = n_links['Clicks'].sum() if not n_links.empty else 0
+                    n_link_ttm = n_links['TTMs'].sum() if not n_links.empty and 'TTMs' in n_links.columns else 0
 
-                n_link_v = n_links['Views'].sum() if not n_links.empty else 0
-                n_link_cl = n_links['Clicks'].sum() if not n_links.empty else 0
-                n_link_ttm = n_links['TTMs'].sum() if not n_links.empty and 'TTMs' in n_links.columns else 0
+                    b_tot_v, b_tot_cl, b_tot_ttm = b_item_v + b_link_v, b_item_cl + b_link_cl, b_item_ttm + b_link_ttm
+                    n_tot_v, n_tot_cl, n_tot_ttm = n_item_v + n_link_v, n_item_cl + n_link_cl, n_item_ttm + n_link_ttm
 
-                # Combined Totals
-                b_tot_v, b_tot_cl, b_tot_ttm = b_item_v + b_link_v, b_item_cl + b_link_cl, b_item_ttm + b_link_ttm
-                n_tot_v, n_tot_cl, n_tot_ttm = n_item_v + n_link_v, n_item_cl + n_link_cl, n_item_ttm + n_link_ttm
+                    b_item_ctr = (b_item_cl / b_item_v) if b_item_v > 0 else 0.0
+                    n_item_ctr = (n_item_cl / n_item_v) if n_item_v > 0 else 0.0
 
-                # Rates
-                b_item_ctr = (b_item_cl / b_item_v) if b_item_v > 0 else 0.0
-                n_item_ctr = (n_item_cl / n_item_v) if n_item_v > 0 else 0.0
+                    b_link_ttmr = (b_link_ttm / b_link_v) if b_link_v > 0 else 0.0
+                    n_link_ttmr = (n_link_ttm / n_link_v) if n_link_v > 0 else 0.0
 
-                b_item_ttmr = (b_item_ttm / b_item_v) if b_item_v > 0 else 0.0
-                n_item_ttmr = (n_item_ttm / n_item_v) if n_item_v > 0 else 0.0
+                    b_tot_ctr = (b_tot_cl / b_tot_v) if b_tot_v > 0 else 0.0
+                    n_tot_ctr = (n_tot_cl / n_tot_v) if n_tot_v > 0 else 0.0
 
-                b_link_ctr = (b_link_cl / b_link_v) if b_link_v > 0 else 0.0
-                n_link_ctr = (n_link_cl / n_link_v) if n_link_v > 0 else 0.0
+                    def calc_var(new_v, base_v):
+                        return (new_v - base_v) / base_v if base_v > 0 else 0.0
 
-                b_link_ttmr = (b_link_ttm / b_link_v) if b_link_v > 0 else 0.0
-                n_link_ttmr = (n_link_ttm / n_link_v) if n_link_v > 0 else 0.0
+                    summary_data = {
+                        "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
+                        "Product Views": [f"{b_item_v:,.0f}", f"{n_item_v:,.0f}", f"{calc_var(n_item_v, b_item_v):+.2%}"],
+                        "Product Clicks": [f"{b_item_cl:,.0f}", f"{n_item_cl:,.0f}", f"{calc_var(n_item_cl, b_item_cl):+.2%}"],
+                        "Product CTR %": [f"{b_item_ctr:.2%}", f"{n_item_ctr:.2%}", f"{calc_var(n_item_ctr, b_item_ctr):+.2%}"],
+                        "Product TTMs": [f"{b_item_ttm:,.0f}", f"{n_item_ttm:,.0f}", f"{calc_var(n_item_ttm, b_item_ttm):+.2%}"],
+                        "Link Views": [f"{b_link_v:,.0f}", f"{n_link_v:,.0f}", f"{calc_var(n_link_v, b_link_v):+.2%}"],
+                        "Link Clicks": [f"{b_link_cl:,.0f}", f"{n_link_cl:,.0f}", f"{calc_var(n_link_cl, b_link_cl):+.2%}"],
+                        "Link TTMR %": [f"{b_link_ttmr:.2%}", f"{n_link_ttmr:.2%}", f"{calc_var(n_link_ttmr, b_link_ttmr):+.2%}"],
+                        "Total Views": [f"{b_tot_v:,.0f}", f"{n_tot_v:,.0f}", f"{calc_var(n_tot_v, b_tot_v):+.2%}"],
+                        "Total Clicks": [f"{b_tot_cl:,.0f}", f"{n_tot_cl:,.0f}", f"{calc_var(n_tot_cl, b_tot_cl):+.2%}"],
+                        "Global CTR %": [f"{b_tot_ctr:.2%}", f"{n_tot_ctr:.2%}", f"{calc_var(n_tot_ctr, b_tot_ctr):+.2%}"],
+                        "Total TTMs": [f"{b_tot_ttm:,.0f}", f"{n_tot_ttm:,.0f}", f"{calc_var(n_tot_ttm, b_tot_ttm):+.2%}"]
+                    }
 
-                b_tot_ctr = (b_tot_cl / b_tot_v) if b_tot_v > 0 else 0.0
-                n_tot_ctr = (n_tot_cl / n_tot_v) if n_tot_v > 0 else 0.0
+                    df_summary = pd.DataFrame(summary_data)
+                    export_sheets["Merch_Macro_Comparison"] = df_summary
+                    st.dataframe(df_summary, use_container_width=True, hide_index=True)
+                    st.caption("ℹ️ **Products** represent SKU listings. **Links** represent marketing banners and navigation CTAs. **Combined** represents total campaign interaction.")
 
-                b_tot_ttmr = (b_tot_ttm / b_tot_v) if b_tot_v > 0 else 0.0
-                n_tot_ttmr = (n_tot_ttm / n_tot_v) if n_tot_v > 0 else 0.0
+                # 📖 PAGE-BY-PAGE ENGAGEMENT ANALYSIS
+                if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
+                    st.write("---")
+                    st.subheader("📖 Page-by-Page Engagement Analysis")
+                    
+                    df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
+                    df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
 
-                def get_variance(new_val, base_val):
-                    return (new_val - base_val) / base_val if base_val > 0 else 0.0
+                    base_p_agg = df_base.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    base_p_agg['Base CTR %'] = np.where(base_p_agg['Views'] > 0, base_p_agg['Clicks'] / base_p_agg['Views'], 0)
+                    base_p_agg.rename(columns={'Views': 'Base Views', 'Clicks': 'Base Clicks'}, inplace=True)
 
-                def color_variance_cells(val):
-                    if isinstance(val, str):
-                        if val.startswith('+') and val != '+0.00%':
-                            return 'color: #28a745; font-weight: bold;'
-                        elif val.startswith('-'):
-                            return 'color: #fd7e14; font-weight: bold;'
-                    return ''
+                    new_p_agg = df_new.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
+                    new_p_agg['New CTR %'] = np.where(new_p_agg['Views'] > 0, new_p_agg['Clicks'] / new_p_agg['Views'], 0)
+                    new_p_agg.rename(columns={'Views': 'New Views', 'Clicks': 'New Clicks'}, inplace=True)
 
-                # --- SINGLE UNIFIED BACK-TO-BACK HORIZONTAL TABLE ---
-                summary_data = {
-                    "Metric": ["Historical (Base)", "Current (New)", "Variance %"],
-                    "Product Views": [f"{b_item_v:,.0f}", f"{n_item_v:,.0f}", f"{get_variance(n_item_v, b_item_v):+.2%}"],
-                    "Product Clicks": [f"{b_item_cl:,.0f}", f"{n_item_cl:,.0f}", f"{get_variance(n_item_cl, b_item_cl):+.2%}"],
-                    "Product CTR %": [f"{b_item_ctr:.2%}", f"{n_item_ctr:.2%}", f"{get_variance(n_item_ctr, b_item_ctr):+.2%}"],
-                    "Product TTMs": [f"{b_item_ttm:,.0f}", f"{n_item_ttm:,.0f}", f"{get_variance(n_item_ttm, b_item_ttm):+.2%}"],
-                    "Link Views": [f"{b_link_v:,.0f}", f"{n_link_v:,.0f}", f"{get_variance(n_link_v, b_link_v):+.2%}"],
-                    "Link Clicks": [f"{b_link_cl:,.0f}", f"{n_link_cl:,.0f}", f"{get_variance(n_link_cl, b_link_cl):+.2%}"],
-                    "Link TTMR %": [f"{b_link_ttmr:.2%}", f"{n_link_ttmr:.2%}", f"{get_variance(n_link_ttmr, b_link_ttmr):+.2%}"],
-                    "Total Views": [f"{b_tot_v:,.0f}", f"{n_tot_v:,.0f}", f"{get_variance(n_tot_v, b_tot_v):+.2%}"],
-                    "Total Clicks": [f"{b_tot_cl:,.0f}", f"{n_tot_cl:,.0f}", f"{get_variance(n_tot_cl, b_tot_cl):+.2%}"],
-                    "Global CTR %": [f"{b_tot_ctr:.2%}", f"{n_tot_ctr:.2%}", f"{get_variance(n_tot_ctr, b_tot_ctr):+.2%}"],
-                    "Total TTMs": [f"{b_tot_ttm:,.0f}", f"{n_tot_ttm:,.0f}", f"{get_variance(n_tot_ttm, b_tot_ttm):+.2%}"]
-                }
+                    merged_page = pd.merge(base_p_agg, new_p_agg, on='Page Position', how='outer').fillna(0)
+                    merged_page['Page_Num'] = pd.to_numeric(merged_page['Page Position'], errors='coerce')
+                    merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
 
-                df_summary = pd.DataFrame(summary_data)
-                export_sheets["Merch_Macro_Comparison"] = df_summary
-
-                st.dataframe(df_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
-                st.caption("ℹ️ **Products** represent SKU listings. **Links** represent marketing banners and navigation CTAs. **Combined** represents total campaign interaction.")
-
-            # ---------------------------------------------------------
-            # 📖 PAGE-BY-PAGE ENGAGEMENT ANALYSIS
-            # ---------------------------------------------------------
-            if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
-                st.write("---")
-                st.subheader("📖 Page-by-Page Engagement Analysis")
-                
-                df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
-                df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
-
-                base_page_agg = df_base.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                base_page_agg['CTR %'] = np.where(base_page_agg['Views'] > 0, base_page_agg['Clicks'] / base_page_agg['Views'], 0)
-                base_page_agg.rename(columns={'Views': 'Base Views', 'Clicks': 'Base Clicks', 'CTR %': 'Base CTR %'}, inplace=True)
-
-                new_page_agg = df_new.groupby('Page Position').agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                new_page_agg['CTR %'] = np.where(new_page_agg['Views'] > 0, new_page_agg['Clicks'] / new_page_agg['Views'], 0)
-                new_page_agg.rename(columns={'Views': 'New Views', 'Clicks': 'New Clicks', 'CTR %': 'New CTR %'}, inplace=True)
-
-                merged_page = pd.merge(base_page_agg, new_page_agg, on='Page Position', how='outer').fillna(0)
-                
-                merged_page['Page_Num'] = pd.to_numeric(merged_page['Page Position'], errors='coerce')
-                merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
-
-                export_sheets["Page_Engagement_Analysis"] = merged_page
-
-                st.dataframe(
-                    merged_page.style.format({
-                        'Base Views': '{:,.0f}', 'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}',
-                        'New Views': '{:,.0f}', 'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}'
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            # ---------------------------------------------------------
-            # 🔀 MERCHANDISING MOVEMENT ANALYSIS (Repeat vs New vs Dropped)
-            # ---------------------------------------------------------
-            has_sku_base = 'SKU' in df_base.columns and df_base['SKU'].dropna().astype(str).str.strip().ne('').any()
-            has_sku_new = 'SKU' in df_new.columns and df_new['SKU'].dropna().astype(str).str.strip().ne('').any()
-
-            # Determine key column (SKU preferred, fallback to item_col)
-            match_key = 'SKU' if (has_sku_base and has_sku_new) else item_col
-
-            if match_key in df_base.columns and match_key in df_new.columns:
-                st.write("---")
-                st.subheader(f"🔀 Merchandising Assortment Movement Analysis *(Matched via `{match_key}`)*")
-
-                # Filter datasets to Products Only (exclude blanks/banners if matching on SKU)
-                if match_key == 'SKU':
-                    df_b_prod = df_base[df_base['SKU'].notna() & df_base['SKU'].astype(str).str.strip().ne('') & (df_base['SKU'].astype(str).str.strip().str.lower() != 'nan')].copy()
-                    df_n_prod = df_new[df_new['SKU'].notna() & df_new['SKU'].astype(str).str.strip().ne('') & (df_new['SKU'].astype(str).str.strip().str.lower() != 'nan')].copy()
-                else:
-                    df_b_prod = df_base.copy()
-                    df_n_prod = df_new.copy()
-
-                base_keys = set(df_b_prod[match_key].dropna().astype(str).str.strip().unique())
-                new_keys = set(df_n_prod[match_key].dropna().astype(str).str.strip().unique())
-
-                repeat_keys = base_keys.intersection(new_keys)
-                added_keys = new_keys - base_keys
-                dropped_keys = base_keys - new_keys
-
-                mc1, mc2, mc3 = st.columns(3)
-                mc1.metric("🔄 Repeat Featured Items", f"{len(repeat_keys):,}")
-                mc2.metric("🆕 New Item Additions", f"{len(added_keys):,}")
-                mc3.metric("❌ Dropped Items", f"{len(dropped_keys):,}")
-
-                # --- TOP REPEAT ITEMS COMPARISON ---
-                if len(repeat_keys) > 0:
-                    group_cols_base = ['SKU', item_col] if ('SKU' in df_b_prod.columns and item_col != 'SKU') else [match_key]
-                    group_cols_new = ['SKU', item_col] if ('SKU' in df_n_prod.columns and item_col != 'SKU') else [match_key]
-
-                    df_base_rep = df_b_prod[df_b_prod[match_key].astype(str).str.strip().isin(repeat_keys)].groupby(group_cols_base).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    df_base_rep['Base CTR %'] = np.where(df_base_rep['Views'] > 0, df_base_rep['Clicks'] / df_base_rep['Views'], 0)
-
-                    df_new_rep = df_n_prod[df_n_prod[match_key].astype(str).str.strip().isin(repeat_keys)].groupby(group_cols_new).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    df_new_rep['New CTR %'] = np.where(df_new_rep['Views'] > 0, df_new_rep['Clicks'] / df_new_rep['Views'], 0)
-
-                    rep_merged = pd.merge(
-                        df_base_rep,
-                        df_new_rep,
-                        on=match_key,
-                        suffixes=(' Base', ' New')
-                    )
-
-                    # Standardize column naming for repeat table
-                    if item_col in rep_merged.columns + ' New':
-                        name_col_rep = item_col + ' New' if (item_col + ' New') in rep_merged.columns else (item_col + ' Base' if (item_col + ' Base') in rep_merged.columns else item_col)
-                        rep_merged.rename(columns={name_col_rep: 'Merchandise Name'}, inplace=True)
-                    elif item_col in rep_merged.columns:
-                        rep_merged.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
-
-                    rep_merged['CTR % Variance'] = np.where(rep_merged['Base CTR %'] > 0, (rep_merged['New CTR %'] - rep_merged['Base CTR %']) / rep_merged['Base CTR %'], 0)
-                    rep_merged = rep_merged.sort_values(by='Clicks New', ascending=False)
-
-                    # Reorder display columns
-                    disp_cols_rep = []
-                    if 'SKU' in rep_merged.columns: disp_cols_rep.append('SKU')
-                    if 'Merchandise Name' in rep_merged.columns: disp_cols_rep.append('Merchandise Name')
-                    disp_cols_rep.extend(['Clicks Base', 'Base CTR %', 'Clicks New', 'New CTR %', 'CTR % Variance'])
-
-                    final_rep_table = rep_merged[[c for c in disp_cols_rep if c in rep_merged.columns]].head(15)
-                    export_sheets["Repeat_Items_Comparison"] = final_rep_table
-
-                    st.markdown("**Top Repeat Items Performance Comparison**")
+                    export_sheets["Page_Engagement_Analysis"] = merged_page
                     st.dataframe(
-                        final_rep_table.style.format({
-                            'Clicks Base': '{:,.0f}', 'Base CTR %': '{:.2%}',
-                            'Clicks New': '{:,.0f}', 'New CTR %': '{:.2%}',
-                            'CTR % Variance': '{:+.2%}'
+                        merged_page.style.format({
+                            'Base Views': '{:,.0f}', 'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}',
+                            'New Views': '{:,.0f}', 'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}'
                         }),
-                        use_container_width=True,
-                        hide_index=True
+                        use_container_width=True, hide_index=True
                     )
 
-                # --- DRILL-DOWN EXPANDERS FOR NEW AND DROPPED SKUS ---
-                col_exp1, col_exp2 = st.columns(2)
-                with col_exp1:
-                    with st.expander(f"🆕 **View New Item Additions ({len(added_keys):,})**"):
-                        df_added = df_n_prod[df_n_prod[match_key].astype(str).str.strip().isin(added_keys)].copy()
-                        grp_add = ['SKU', item_col] if ('SKU' in df_added.columns and item_col != 'SKU') else [match_key]
-                        df_added_agg = df_added.groupby(grp_add).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        df_added_agg['CTR %'] = np.where(df_added_agg['Views'] > 0, df_added_agg['Clicks'] / df_added_agg['Views'], 0)
-                        df_added_agg = df_added_agg.sort_values(by='Clicks', ascending=False)
-                        st.dataframe(df_added_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-
-                with col_exp2:
-                    with st.expander(f"❌ **View Dropped Items ({len(dropped_keys):,})**"):
-                        df_dropped = df_b_prod[df_b_prod[match_key].astype(str).str.strip().isin(dropped_keys)].copy()
-                        grp_drop = ['SKU', item_col] if ('SKU' in df_dropped.columns and item_col != 'SKU') else [match_key]
-                        df_dropped_agg = df_dropped.groupby(grp_drop).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        df_dropped_agg['CTR %'] = np.where(df_dropped_agg['Views'] > 0, df_dropped_agg['Clicks'] / df_dropped_agg['Views'], 0)
-                        df_dropped_agg = df_dropped_agg.sort_values(by='Clicks', ascending=False)
-                        st.dataframe(df_dropped_agg.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-            # --- FRONT COVER PERFORMANCE ---
-            if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
-                df_base_cover = df_base[df_base['Page Position'] == '1'].copy()
-                df_new_cover = df_new[df_new['Page Position'] == '1'].copy()
-
-                st.write("---")
-                st.subheader("📘 Front Cover Performance (Page 1)")
-
-                if item_col in df_base_cover.columns and item_col in df_new_cover.columns:
-                    if 'Views' in df_base_cover.columns and 'Clicks' in df_base_cover.columns:
-                        
-                        base_grp = get_group_cols(df_base_cover, item_col)
-                        new_grp = get_group_cols(df_new_cover, item_col)
-
-                        base_agg = df_base_cover.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        base_agg['CTR %'] = np.where(base_agg['Views'] > 0, base_agg['Clicks'] / base_agg['Views'], 0)
-                        base_top = base_agg.sort_values(by='Clicks', ascending=False).head(10)[base_grp + ['Clicks', 'CTR %']]
-                        base_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
-
-                        new_agg = df_new_cover.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        new_agg['CTR %'] = np.where(new_agg['Views'] > 0, new_agg['Clicks'] / new_agg['Views'], 0)
-                        new_top = new_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
-                        new_top.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
-
-                        export_sheets["Front_Cover_Base"] = base_top
-                        export_sheets["Front_Cover_New"] = new_top
-
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            st.markdown("**Historical Cover (Base)**")
-                            st.dataframe(base_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                        with c2:
-                            st.markdown("**Current Cover (New)**")
-                            st.dataframe(new_top.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-
-            # --- TOP 10 OVERALL ITEMS BY CTR & CLICKS (Products ONLY) ---
-            def filter_products(df):
-                if 'SKU' in df.columns:
-                    has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().str.lower() != 'nan')
-                    return df[has_sku].copy()
-                if 'Display Type' in df.columns:
-                    return df[df['Display Type'].astype(str).str.upper() == 'ITEM'].copy()
-                return df
-                
-            df_base_items = filter_products(df_base)
-            df_new_items = filter_products(df_new)
-
-            if item_col in df_base_items.columns and item_col in df_new_items.columns:
-                if 'Views' in df_base_items.columns and 'Clicks' in df_base_items.columns:
+                # 🖼️ TOP 10 MARKETING ASSETS BY TTMR % & TTMS
+                def filter_assets(df):
+                    if 'SKU' in df.columns:
+                        no_sku = df['SKU'].isna() | (df['SKU'].astype(str).str.strip() == '') | (df['SKU'].astype(str).str.strip().str.lower() == 'nan')
+                        return df[no_sku].copy()
+                    if 'Display Type' in df.columns:
+                        return df[df['Display Type'].astype(str).str.upper() == 'LINK'].copy()
+                    return pd.DataFrame()
                     
-                    base_grp = get_group_cols(df_base_items, item_col)
-                    new_grp = get_group_cols(df_new_items, item_col)
-                    
-                    base_all_agg = df_base_items.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    base_all_agg['CTR %'] = np.where(base_all_agg['Views'] > 0, base_all_agg['Clicks'] / base_all_agg['Views'], 0)
-                    
-                    new_all_agg = df_new_items.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                    new_all_agg['CTR %'] = np.where(new_all_agg['Views'] > 0, new_all_agg['Clicks'] / new_all_agg['Views'], 0)
+                df_base_assets = filter_assets(df_base)
+                df_new_assets = filter_assets(df_new)
 
-                    base_ctr_pool = base_all_agg[base_all_agg['Views'] >= 50] if len(base_all_agg[base_all_agg['Views'] >= 50]) >= 10 else base_all_agg
-                    new_ctr_pool = new_all_agg[new_all_agg['Views'] >= 50] if len(new_all_agg[new_all_agg['Views'] >= 50]) >= 10 else new_all_agg
+                if item_col in df_base_assets.columns and item_col in df_new_assets.columns:
+                    if len(df_base_assets) > 0 or len(df_new_assets) > 0:
+                        if 'Views' in df_base_assets.columns:
+                            if 'TTMs' not in df_base_assets.columns: df_base_assets['TTMs'] = 0
+                            if 'TTMs' not in df_new_assets.columns: df_new_assets['TTMs'] = 0
 
-                    st.write("---")
-                    st.subheader("🎯 Top-10 Clicked Items by CTR")
-                    st.markdown("*Ranked by Highest CTR (requires a minimum baseline of views, excludes marketing assets)*")
-                    
-                    base_top_ctr = base_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[base_grp + ['Clicks', 'CTR %']]
-                    base_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
-                    
-                    new_top_ctr = new_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[new_grp + ['Clicks', 'CTR %']]
-                    new_top_ctr.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                            base_grp = get_group_cols(df_base_assets, item_col)
+                            new_grp = get_group_cols(df_new_assets, item_col)
 
-                    export_sheets["Products_Top_CTR_Base"] = base_top_ctr
-                    export_sheets["Products_Top_CTR_New"] = new_top_ctr
+                            base_a_agg = df_base_assets.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+                            base_a_agg['TTMR %'] = np.where(base_a_agg['Views'] > 0, base_a_agg['TTMs'] / base_a_agg['Views'], 0)
+                            
+                            new_a_agg = df_new_assets.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+                            new_a_agg['TTMR %'] = np.where(new_a_agg['Views'] > 0, new_a_agg['TTMs'] / new_a_agg['Views'], 0)
 
-                    c3, c4 = st.columns(2)
-                    with c3:
-                        st.markdown("**Historical Top CTR (Base)**")
-                        st.dataframe(base_top_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                    with c4:
-                        st.markdown("**Current Top CTR (New)**")
-                        st.dataframe(new_top_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            base_pool = base_a_agg[base_a_agg['Views'] >= 50] if len(base_a_agg[base_a_agg['Views'] >= 50]) > 0 else base_a_agg
+                            new_pool = new_a_agg[new_a_agg['Views'] >= 50] if len(new_a_agg[new_a_agg['Views'] >= 50]) > 0 else new_a_agg
 
-                    st.write("---")
-                    st.subheader("🔥 Top-10 Clicked Items by Clicks")
-                    st.markdown("*Ranked by Highest Total Volume of Clicks (excludes marketing assets)*")
-                    
-                    base_top_clicks = base_all_agg.sort_values(by='Clicks', ascending=False).head(10)[base_grp + ['Clicks', 'CTR %']]
-                    base_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
-                    
-                    new_top_clicks = new_all_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
-                    new_top_clicks.rename(columns={item_col: 'Merchandise Name'}, inplace=True)
+                            st.write("---")
+                            st.subheader("🖼️ Top-10 Marketing Assets by TTMR %")
+                            
+                            base_top_ttmr = base_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[base_grp + ['TTMs', 'TTMR %']]
+                            base_top_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                            
+                            new_top_ttmr = new_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[new_grp + ['TTMs', 'TTMR %']]
+                            new_top_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
-                    export_sheets["Products_Top_Clicks_Base"] = base_top_clicks
-                    export_sheets["Products_Top_Clicks_New"] = new_top_clicks
+                            export_sheets["Assets_Top_TTMR_Base"] = base_top_ttmr
+                            export_sheets["Assets_Top_TTMR_New"] = new_top_ttmr
 
-                    c5, c6 = st.columns(2)
-                    with c5:
-                        st.markdown("**Historical Top Clicks (Base)**")
-                        st.dataframe(base_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                    with c6:
-                        st.markdown("**Current Top Clicks (New)**")
-                        st.dataframe(new_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            c7, c8 = st.columns(2)
+                            with c7:
+                                st.markdown("**Historical Top TTMR % (Base)**")
+                                st.dataframe(base_top_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            with c8:
+                                st.markdown("**Current Top TTMR % (New)**")
+                                st.dataframe(new_top_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-            # ---------------------------------------------------------
-            # 🖼️ TOP 10 MARKETING ASSETS BY TTMR % & TTMS (Assets ONLY)
-            # ---------------------------------------------------------
-            def filter_assets(df):
-                if 'SKU' in df.columns:
-                    no_sku = df['SKU'].isna() | (df['SKU'].astype(str).str.strip() == '') | (df['SKU'].astype(str).str.strip().str.lower() == 'nan')
-                    return df[no_sku].copy()
-                if 'Display Type' in df.columns:
-                    return df[df['Display Type'].astype(str).str.upper() == 'LINK'].copy()
-                return pd.DataFrame()
-                
-            df_base_assets = filter_assets(df_base)
-            df_new_assets = filter_assets(df_new)
+                            st.write("---")
+                            st.subheader("📢 Top-10 Marketing Assets by Total TTMs")
+                            
+                            base_top_ttms = base_a_agg.sort_values(by='TTMs', ascending=False).head(10)[base_grp + ['TTMs', 'TTMR %']]
+                            base_top_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                            
+                            new_top_ttms = new_a_agg.sort_values(by='TTMs', ascending=False).head(10)[new_grp + ['TTMs', 'TTMR %']]
+                            new_top_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
-            if item_col in df_base_assets.columns and item_col in df_new_assets.columns:
-                if len(df_base_assets) > 0 or len(df_new_assets) > 0:
-                    if 'Views' in df_base_assets.columns:
-                        
-                        # Fallback for TTMs column if missing
-                        if 'TTMs' not in df_base_assets.columns: df_base_assets['TTMs'] = 0
-                        if 'TTMs' not in df_new_assets.columns: df_new_assets['TTMs'] = 0
+                            export_sheets["Assets_Top_TTMs_Base"] = base_top_ttms
+                            export_sheets["Assets_Top_TTMs_New"] = new_top_ttms
 
-                        base_grp = get_group_cols(df_base_assets, item_col)
-                        new_grp = get_group_cols(df_new_assets, item_col)
+                            c9, c10 = st.columns(2)
+                            with c9:
+                                st.markdown("**Historical Top TTM Volume (Base)**")
+                                st.dataframe(base_top_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            with c10:
+                                st.markdown("**Current Top TTM Volume (New)**")
+                                st.dataframe(new_top_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-                        base_asset_agg = df_base_assets.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
-                        base_asset_agg['TTMR %'] = np.where(base_asset_agg['Views'] > 0, base_asset_agg['TTMs'] / base_asset_agg['Views'], 0)
-                        
-                        new_asset_agg = df_new_assets.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
-                        new_asset_agg['TTMR %'] = np.where(new_asset_agg['Views'] > 0, new_asset_agg['TTMs'] / new_asset_agg['Views'], 0)
-
-                        base_asset_ttmr_pool = base_asset_agg[base_asset_agg['Views'] >= 50] if len(base_asset_agg[base_asset_agg['Views'] >= 50]) > 0 else base_asset_agg
-                        new_asset_ttmr_pool = new_asset_agg[new_asset_agg['Views'] >= 50] if len(new_asset_agg[new_asset_agg['Views'] >= 50]) > 0 else new_asset_agg
-
-                        # --- 1. TOP 10 MARKETING ASSETS BY TTMR % ---
-                        st.write("---")
-                        st.subheader("🖼️ Top-10 Marketing Assets by TTMR %")
-                        st.markdown("*Ranked by Highest Transfer to Merchant Rate (TTMs ÷ Views, marketing banners/links only)*")
-                        
-                        base_top_asset_ttmr = base_asset_ttmr_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[base_grp + ['TTMs', 'TTMR %']]
-                        base_top_asset_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
-                        
-                        new_top_asset_ttmr = new_asset_ttmr_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[new_grp + ['TTMs', 'TTMR %']]
-                        new_top_asset_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
-
-                        export_sheets["Assets_Top_TTMR_Base"] = base_top_asset_ttmr
-                        export_sheets["Assets_Top_TTMR_New"] = new_top_asset_ttmr
-
-                        c7, c8 = st.columns(2)
-                        with c7:
-                            st.markdown("**Historical Top TTMR % (Base)**")
-                            st.dataframe(base_top_asset_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                        with c8:
-                            st.markdown("**Current Top TTMR % (New)**")
-                            st.dataframe(new_top_asset_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-
-                        # --- 2. TOP 10 MARKETING ASSETS BY TTMS VOLUME ---
-                        st.write("---")
-                        st.subheader("📢 Top-10 Marketing Assets by Total TTMs")
-                        st.markdown("*Ranked by Highest Total Volume of Transfers to Merchant (marketing banners/links only)*")
-                        
-                        base_top_asset_ttms = base_asset_agg.sort_values(by='TTMs', ascending=False).head(10)[base_grp + ['TTMs', 'TTMR %']]
-                        base_top_asset_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
-                        
-                        new_top_asset_ttms = new_asset_agg.sort_values(by='TTMs', ascending=False).head(10)[new_grp + ['TTMs', 'TTMR %']]
-                        new_top_asset_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
-
-                        export_sheets["Assets_Top_TTMs_Base"] = base_top_asset_ttms
-                        export_sheets["Assets_Top_TTMs_New"] = new_top_asset_ttms
-
-                        c9, c10 = st.columns(2)
-                        with c9:
-                            st.markdown("**Historical Top TTM Volume (Base)**")
-                            st.dataframe(base_top_asset_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-                        with c10:
-                            st.markdown("**Current Top TTM Volume (New)**")
-                            st.dataframe(new_top_asset_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
-
-        # ---------------------------------------------------------
         # 📥 GLOBAL EXCEL DOWNLOAD BUTTON
-        # ---------------------------------------------------------
         if export_sheets:
             st.write("---")
-            
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 for sheet_name, df_sheet in export_sheets.items():
                     df_sheet.to_excel(writer, sheet_name=sheet_name[:31], index=False)
             
             excel_data = output.getvalue()
-
             st.download_button(
                 label="📥 Download Campaign Analysis (.xlsx)",
                 data=excel_data,
@@ -1730,12 +1419,10 @@ def render_head_to_head_variance():
                 use_container_width=True
             )
 
-        # ---------------------------------------------------------
         # ⚠️ WARNING LOGIC
-        # ---------------------------------------------------------
         if not (base_merch_file and new_merch_file) and not (base_funnel_file and new_funnel_file):
             st.warning("⚠️ Please upload BOTH Base and New files for either Merchandise or Funnel metrics to run the comparison.")
-            
+
 # ==============================================================================
 # 🧰 MODULE 4: TAYLOR'S WORKSPACE (REGIONAL CTR ENGINE)
 # ==============================================================================

@@ -1025,6 +1025,7 @@ def render_head_to_head_variance():
     import pandas as pd
     import numpy as np
     import io
+    import streamlit as st
 
     st.write("---")
     st.header("⚖️ Head-to-Head Campaign Comparison")
@@ -1283,6 +1284,14 @@ def render_head_to_head_variance():
             df_base = load_merch_data(base_merch_file)
             df_new = load_merch_data(new_merch_file)
 
+            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else ('Merchandise Name' if 'Merchandise Name' in df_base.columns else 'Name')
+
+            def get_group_cols(df, main_col):
+                cols = [main_col]
+                if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
+                if 'Page Position' in df.columns: cols.append('Page Position')
+                return cols
+
             # Safely check if dataframes were successfully created
             if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
@@ -1290,8 +1299,11 @@ def render_head_to_head_variance():
 
                 # Helper function to split dataset into Products (Items) vs Marketing Links
                 def split_items_and_links(df):
+                    if df is None or df.empty:
+                        return pd.DataFrame(), pd.DataFrame()
+
                     if 'SKU' in df.columns:
-                        has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().lower() != 'nan')
+                        has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().str.lower() != 'nan')
                         items_df = df[has_sku].copy()
                         links_df = df[~has_sku].copy()
                     elif 'Display Type' in df.columns:
@@ -1301,6 +1313,7 @@ def render_head_to_head_variance():
                     else:
                         items_df = df.copy()
                         links_df = pd.DataFrame()
+                        
                     return items_df, links_df
 
                 b_items, b_links = split_items_and_links(df_base)
@@ -1545,11 +1558,11 @@ def render_head_to_head_variance():
 
             # --- TOP 10 OVERALL ITEMS BY CTR & CLICKS (Products ONLY) ---
             def filter_products(df):
-                if 'Display Type' in df.columns:
-                    df = df[df['Display Type'].astype(str).str.upper() == 'ITEM']
                 if 'SKU' in df.columns:
-                    df = df[df['SKU'].notna()]
-                    df = df[df['SKU'].astype(str).str.strip() != '']
+                    has_sku = df['SKU'].notna() & (df['SKU'].astype(str).str.strip() != '') & (df['SKU'].astype(str).str.strip().str.lower() != 'nan')
+                    return df[has_sku].copy()
+                if 'Display Type' in df.columns:
+                    return df[df['Display Type'].astype(str).str.upper() == 'ITEM'].copy()
                 return df
                 
             df_base_items = filter_products(df_base)
@@ -1614,9 +1627,12 @@ def render_head_to_head_variance():
 
             # --- TOP 10 MARKETING ASSETS BY CTR & CLICKS (Assets ONLY) ---
             def filter_assets(df):
+                if 'SKU' in df.columns:
+                    no_sku = df['SKU'].isna() | (df['SKU'].astype(str).str.strip() == '') | (df['SKU'].astype(str).str.strip().str.lower() == 'nan')
+                    return df[no_sku].copy()
                 if 'Display Type' in df.columns:
-                    df = df[df['Display Type'].astype(str).str.upper() == 'LINK']
-                return df
+                    return df[df['Display Type'].astype(str).str.upper() == 'LINK'].copy()
+                return pd.DataFrame()
                 
             df_base_assets = filter_assets(df_base)
             df_new_assets = filter_assets(df_new)

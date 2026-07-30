@@ -1631,7 +1631,9 @@ def render_head_to_head_variance():
                         st.markdown("**Current Top Clicks (New)**")
                         st.dataframe(new_top_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
-            # --- TOP 10 MARKETING ASSETS BY CTR & CLICKS (Assets ONLY) ---
+            # ---------------------------------------------------------
+            # 🖼️ TOP 10 MARKETING ASSETS BY TTMR % & TTMS (Assets ONLY)
+            # ---------------------------------------------------------
             def filter_assets(df):
                 if 'SKU' in df.columns:
                     no_sku = df['SKU'].isna() | (df['SKU'].astype(str).str.strip() == '') | (df['SKU'].astype(str).str.strip().str.lower() == 'nan')
@@ -1645,61 +1647,67 @@ def render_head_to_head_variance():
 
             if item_col in df_base_assets.columns and item_col in df_new_assets.columns:
                 if len(df_base_assets) > 0 or len(df_new_assets) > 0:
-                    if 'Views' in df_base_assets.columns and 'Clicks' in df_base_assets.columns:
+                    if 'Views' in df_base_assets.columns:
                         
+                        # Fallback for TTMs column if missing
+                        if 'TTMs' not in df_base_assets.columns: df_base_assets['TTMs'] = 0
+                        if 'TTMs' not in df_new_assets.columns: df_new_assets['TTMs'] = 0
+
                         base_grp = get_group_cols(df_base_assets, item_col)
                         new_grp = get_group_cols(df_new_assets, item_col)
 
-                        base_asset_agg = df_base_assets.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        base_asset_agg['CTR %'] = np.where(base_asset_agg['Views'] > 0, base_asset_agg['Clicks'] / base_asset_agg['Views'], 0)
+                        base_asset_agg = df_base_assets.groupby(base_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+                        base_asset_agg['TTMR %'] = np.where(base_asset_agg['Views'] > 0, base_asset_agg['TTMs'] / base_asset_agg['Views'], 0)
                         
-                        new_asset_agg = df_new_assets.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum'}).reset_index()
-                        new_asset_agg['CTR %'] = np.where(new_asset_agg['Views'] > 0, new_asset_agg['Clicks'] / new_asset_agg['Views'], 0)
+                        new_asset_agg = df_new_assets.groupby(new_grp).agg({'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'}).reset_index()
+                        new_asset_agg['TTMR %'] = np.where(new_asset_agg['Views'] > 0, new_asset_agg['TTMs'] / new_asset_agg['Views'], 0)
 
-                        base_asset_ctr_pool = base_asset_agg[base_asset_agg['Views'] >= 50] if len(base_asset_agg[base_asset_agg['Views'] >= 50]) > 0 else base_asset_agg
-                        new_asset_ctr_pool = new_asset_agg[new_asset_agg['Views'] >= 50] if len(new_asset_agg[new_asset_agg['Views'] >= 50]) > 0 else new_asset_agg
+                        base_asset_ttmr_pool = base_asset_agg[base_asset_agg['Views'] >= 50] if len(base_asset_agg[base_asset_agg['Views'] >= 50]) > 0 else base_asset_agg
+                        new_asset_ttmr_pool = new_asset_agg[new_asset_agg['Views'] >= 50] if len(new_asset_agg[new_asset_agg['Views'] >= 50]) > 0 else new_asset_agg
 
+                        # --- 1. TOP 10 MARKETING ASSETS BY TTMR % ---
                         st.write("---")
-                        st.subheader("🖼️ Top-10 Marketing Assets by CTR")
-                        st.markdown("*Ranked by Highest CTR (marketing banners/links only)*")
+                        st.subheader("🖼️ Top-10 Marketing Assets by TTMR %")
+                        st.markdown("*Ranked by Highest Transfer to Merchant Rate (TTMs ÷ Views, marketing banners/links only)*")
                         
-                        base_top_asset_ctr = base_asset_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[base_grp + ['Clicks', 'CTR %']]
-                        base_top_asset_ctr.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        base_top_asset_ttmr = base_asset_ttmr_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[base_grp + ['TTMs', 'TTMR %']]
+                        base_top_asset_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
                         
-                        new_top_asset_ctr = new_asset_ctr_pool.sort_values(by=['CTR %', 'Clicks'], ascending=[False, False]).head(10)[new_grp + ['Clicks', 'CTR %']]
-                        new_top_asset_ctr.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        new_top_asset_ttmr = new_asset_ttmr_pool.sort_values(by=['TTMR %', 'TTMs'], ascending=[False, False]).head(10)[new_grp + ['TTMs', 'TTMR %']]
+                        new_top_asset_ttmr.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
-                        export_sheets["Assets_Top_CTR_Base"] = base_top_asset_ctr
-                        export_sheets["Assets_Top_CTR_New"] = new_top_asset_ctr
+                        export_sheets["Assets_Top_TTMR_Base"] = base_top_asset_ttmr
+                        export_sheets["Assets_Top_TTMR_New"] = new_top_asset_ttmr
 
                         c7, c8 = st.columns(2)
                         with c7:
-                            st.markdown("**Historical Top Assets (Base)**")
-                            st.dataframe(base_top_asset_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            st.markdown("**Historical Top TTMR % (Base)**")
+                            st.dataframe(base_top_asset_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
                         with c8:
-                            st.markdown("**Current Top Assets (New)**")
-                            st.dataframe(new_top_asset_ctr.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            st.markdown("**Current Top TTMR % (New)**")
+                            st.dataframe(new_top_asset_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
+                        # --- 2. TOP 10 MARKETING ASSETS BY TTMS VOLUME ---
                         st.write("---")
-                        st.subheader("📢 Top-10 Marketing Assets by Clicks")
-                        st.markdown("*Ranked by Highest Total Volume of Clicks (marketing banners/links only)*")
+                        st.subheader("📢 Top-10 Marketing Assets by Total TTMs")
+                        st.markdown("*Ranked by Highest Total Volume of Transfers to Merchant (marketing banners/links only)*")
                         
-                        base_top_asset_clicks = base_asset_agg.sort_values(by='Clicks', ascending=False).head(10)[base_grp + ['Clicks', 'CTR %']]
-                        base_top_asset_clicks.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        base_top_asset_ttms = base_asset_agg.sort_values(by='TTMs', ascending=False).head(10)[base_grp + ['TTMs', 'TTMR %']]
+                        base_top_asset_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
                         
-                        new_top_asset_clicks = new_asset_agg.sort_values(by='Clicks', ascending=False).head(10)[new_grp + ['Clicks', 'CTR %']]
-                        new_top_asset_clicks.rename(columns={item_col: 'Asset Name'}, inplace=True)
+                        new_top_asset_ttms = new_asset_agg.sort_values(by='TTMs', ascending=False).head(10)[new_grp + ['TTMs', 'TTMR %']]
+                        new_top_asset_ttms.rename(columns={item_col: 'Asset Name'}, inplace=True)
 
-                        export_sheets["Assets_Top_Clicks_Base"] = base_top_asset_clicks
-                        export_sheets["Assets_Top_Clicks_New"] = new_top_asset_clicks
+                        export_sheets["Assets_Top_TTMs_Base"] = base_top_asset_ttms
+                        export_sheets["Assets_Top_TTMs_New"] = new_top_asset_ttms
 
                         c9, c10 = st.columns(2)
                         with c9:
-                            st.markdown("**Historical Top Clicks (Base)**")
-                            st.dataframe(base_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            st.markdown("**Historical Top TTM Volume (Base)**")
+                            st.dataframe(base_top_asset_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
                         with c10:
-                            st.markdown("**Current Top Clicks (New)**")
-                            st.dataframe(new_top_asset_clicks.style.format({'Clicks': '{:,.0f}', 'CTR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                            st.markdown("**Current Top TTM Volume (New)**")
+                            st.dataframe(new_top_asset_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
         # 📥 GLOBAL EXCEL DOWNLOAD BUTTON

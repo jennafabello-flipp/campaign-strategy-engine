@@ -1028,7 +1028,7 @@ def render_head_to_head_variance():
     import streamlit as st
 
     st.write("---")
-    st.header("⚖️ Head-to-Head Campaign Comparison")
+    st.header("秤 Head-to-Head Campaign Comparison")
     st.markdown("Upload your Base (Historical) and New (Current) campaign files to generate period-over-period variance and side-by-side performance tables.")
 
     # Dual-upload for Merchandise Metrics
@@ -1261,7 +1261,39 @@ def render_head_to_head_variance():
         # ---------------------------------------------------------
         # 🛒 2. MERCHANDISE & MARKETING LINK PROCESSING
         # ---------------------------------------------------------
-        if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+        if base_merch_file and new_merch_file:
+            st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
+
+            def load_merch_data(file):
+                df = load_generic_data(file)
+                if df is None or df.empty:
+                    return pd.DataFrame()
+                
+                rename_map = {
+                    'Total Item Views': 'Views',
+                    'Item Views': 'Views',
+                    'Total Item Clicks': 'Clicks',
+                    'Item Clicks': 'Clicks',
+                    'Total Transfer to Merchant (TTMs)': 'TTMs',
+                    'Item TTMs': 'TTMs',
+                    'Total TTMs': 'TTMs'
+                }
+                df.rename(columns=rename_map, inplace=True)
+                return df
+
+            df_base = load_merch_data(base_merch_file)
+            df_new = load_merch_data(new_merch_file)
+
+            item_col = 'Clean_Name' if 'Clean_Name' in df_base.columns else ('Merchandise Name' if 'Merchandise Name' in df_base.columns else 'Name')
+
+            def get_group_cols(df, main_col):
+                cols = [main_col]
+                if 'Flyer Run Name' in df.columns: cols.append('Flyer Run Name')
+                if 'Page Position' in df.columns: cols.append('Page Position')
+                return cols
+
+            # Safely check if dataframes were successfully created
+            if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
                 st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
 

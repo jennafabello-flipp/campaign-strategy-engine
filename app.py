@@ -1394,11 +1394,11 @@ def render_head_to_head_variance():
                 st.caption("ℹ️ **Products** represent SKU listings. **Links** represent marketing banners and navigation CTAs. **Combined** represents total campaign interaction.")
 
             # ---------------------------------------------------------
-            # 📖 PAGE-BY-PAGE HEATMAP & DROP-OFF ANALYSIS
+            # 📖 PAGE-BY-PAGE ENGAGEMENT ANALYSIS
             # ---------------------------------------------------------
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 st.write("---")
-                st.subheader("📖 Page-by-Page Engagement & Decay Analysis")
+                st.subheader("📖 Page-by-Page Engagement Analysis")
                 
                 df_base['Page Position'] = df_base['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
                 df_new['Page Position'] = df_new['Page Position'].astype(str).str.replace(".0", "", regex=False).str.strip()
@@ -1416,7 +1416,7 @@ def render_head_to_head_variance():
                 merged_page['Page_Num'] = pd.to_numeric(merged_page['Page Position'], errors='coerce')
                 merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
 
-                export_sheets["Page_Decay_Analysis"] = merged_page
+                export_sheets["Page_Engagement_Analysis"] = merged_page
 
                 st.dataframe(
                     merged_page.style.format({

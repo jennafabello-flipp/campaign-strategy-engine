@@ -1,9 +1,40 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 import io
-import gc
 import re
-import streamlit as st
+import os
+import gc
+
+# Create the hidden directories on the server if they don't exist
+if not os.path.exists("benchmarks"):
+    os.makedirs("benchmarks")
+if not os.path.exists("reference_data"):
+    os.makedirs("reference_data")
+
+# ==============================================================================
+# 🚀 SETUP & CONFIGURATION
+# ==============================================================================
+st.set_page_config(
+    page_title="Enterprise Campaign Strategy Engine",
+    page_icon="🚀",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+st.markdown("""
+    <style>
+    .main-header { color: #002551; font-weight: 800; font-size: 28px; margin-bottom: 5px; }
+    .sub-header { color: #475569; font-size: 14px; margin-bottom: 25px; }
+    .metric-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; text-align: center; }
+    .metric-val { color: #0054B7; font-size: 24px; font-weight: bold; }
+    .metric-lbl { color: #64748b; font-size: 12px; font-weight: bold; }
+    .insight-box { background-color: #f0fdf4; border-left: 5px solid #16a34a; padding: 20px; border-radius: 5px; margin-bottom: 25px; }
+    .insight-title { color: #166534; font-weight: 800; font-size: 18px; margin-bottom: 10px; }
+    .insight-text { color: #1f2937; font-size: 15px; line-height: 1.5; margin-bottom: 15px;}
+    </style>
+""", unsafe_allow_html=True)
 
 # ==============================================================================
 # ⚡ MULTI-FILE BATCH PARSER & COMBINER (RAM Optimized)
@@ -25,7 +56,10 @@ def parse_and_combine_multiple_files(uploaded_files):
         'Total Item Clicks', 'Item Clicks', 'Clicks',
         'Total Transfer to Merchant (TTMs)', 'Item TTMs', 'Total TTMs', 'TTMs',
         'Page Position', 'Page', 'Display Type', 'Category', 'Retailer Category', 'Department',
-        'Flyer Run Name', 'Flyer Run ID', 'Brand', 'Daily Available From', 'Weekly Date'
+        'Flyer Run Name', 'Flyer Run ID', 'Brand', 'Daily Available From', 'Weekly Date',
+        'Total Original Price', 'Original Price', 'Total Current Price', 'Current Price',
+        'Custom ID 1', 'Custom ID 2', 'Custom ID 3', 'Google Category L1', 'Google Category L2',
+        'Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description'
     ]
 
     for file in uploaded_files:
@@ -45,26 +79,26 @@ def parse_and_combine_multiple_files(uploaded_files):
 
                 buffer.seek(0)
                 cols_in_file = pd.read_csv(buffer, header=header_row, nrows=1).columns.astype(str).str.strip()
-                use_cols = [c for c in cols_in_file if c in target_columns or any(t in c.lower() for t in ['views', 'clicks', 'ttm', 'sku', 'name', 'page', 'category'])]
+                use_cols = [c for c in cols_in_file if c in target_columns or any(t in c.lower() for t in ['views', 'clicks', 'ttm', 'sku', 'name', 'page', 'category', 'price'])]
 
                 buffer.seek(0)
                 df = pd.read_csv(buffer, header=header_row, usecols=use_cols if use_cols else None, low_memory=False)
             else:
-                # Excel file loading
                 df = pd.read_excel(buffer)
 
-            df.columns = df.columns.astype(str).str.strip()
+            df.columns = [str(c).strip() for c in df.columns]
 
-            # Standardize core columns
+            # Standardize core metric columns
             rename_map = {
                 'Total Item Views': 'Views', 'Item Views': 'Views',
                 'Total Item Clicks': 'Clicks', 'Item Clicks': 'Clicks',
-                'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs'
+                'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs',
+                'Total Clippings': 'Clips'
             }
             df.rename(columns=rename_map, inplace=True)
 
-            # Standardize numeric columns to int32 to save 75% memory
-            for col in ['Views', 'Clicks', 'TTMs']:
+            # Downcast metric columns to save memory
+            for col in ['Views', 'Clicks', 'Clips', 'TTMs']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int32')
                 else:
@@ -72,7 +106,6 @@ def parse_and_combine_multiple_files(uploaded_files):
 
             processed_chunks.append(df)
             
-            # Immediate Garbage Collection between files
             del file_bytes, buffer, df
             gc.collect()
 
@@ -88,16 +121,304 @@ def parse_and_combine_multiple_files(uploaded_files):
     return pd.DataFrame()
 
 # ==============================================================================
-# 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN (COMPLETE REPLACEMENT)
+# 🧹 ARMORED AUTO-SCRUBBER ENGINE
+# ==============================================================================
+def clean_bilingual_suffix(name_str):
+    if pd.isna(name_str): return "Unnamed Asset"
+    return re.sub(r'(?i)[-_ ]+(FR|EN)\b', '', str(name_str)).strip()
+
+def scrub_and_load_excel(file_obj, is_local_path=False):
+    if file_obj is None: return None, None, None
+    try:
+        if is_local_path:
+            is_csv = file_obj.lower().endswith('.csv')
+            with open(file_obj, 'rb') as f:
+                file_bytes = f.read()
+        else:
+            file_bytes = file_obj.read()
+            is_csv = file_obj.name.lower().endswith('.csv')
+            
+        df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
+            
+        header_idx = 0
+        for i in range(min(30, len(df_raw))):
+            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values]
+            if 'merchandise name' in row_vals or 'total item views' in row_vals or 'sku' in row_vals:
+                header_idx = i
+                break
+                
+        df_clean = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
+        df_clean.columns = [str(c).strip() for c in df_clean.columns]
+
+        def get_col(exact_names):
+            for exact in exact_names:
+                for col in df_clean.columns:
+                    if exact.lower() == col.lower(): return col
+            for exact in exact_names:
+                for col in df_clean.columns:
+                    if exact.lower() in col.lower(): return col
+            return None
+
+        mapping = {
+            'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
+            'date': get_col(['Daily Available From', 'Date', 'Start Date']),
+            'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
+            'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
+            'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
+            'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
+            'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
+            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']),
+            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']), 'goo_l3': get_col(['Google Category L3']),
+            'views': get_col(['Total Item Views', 'Views']), 'clicks': get_col(['Total Item Clicks', 'Clicks']),
+            'clips': get_col(['Total Clippings', 'Clips']), 'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTMS'])
+        }
+        return df_clean, mapping, header_idx
+    except Exception as e:
+        st.error(f"Error scrubbing file setup: {str(e)}")
+        return None, None, None
+
+def process_metrics(df, m):
+    df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
+    df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] else "PRODUCT"
+    df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] else 1
+    df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
+    df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') else pd.NaT
+    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN"
+    df['Flyer_Description'] = df[m['run_name']].astype(str) if m.get('run_name') else df['Run_ID']
+    
+    def safe_numeric(col_name):
+        if m[col_name] and m[col_name] in df.columns:
+            cleaned = df[m[col_name]].astype(str).str.replace(r'[^\d.]', '', regex=True).replace('', '0')
+            return pd.to_numeric(cleaned, errors='coerce').fillna(0)
+        return 0
+
+    df['Views'], df['Clicks'], df['Clips'], df['TTMs'] = safe_numeric('views'), safe_numeric('clicks'), safe_numeric('clips'), safe_numeric('ttms')
+    df['Orig_Price'], df['Curr_Price'] = safe_numeric('orig_price'), safe_numeric('curr_price')
+    df['Discount_Pct'] = np.where(df['Orig_Price'] > 0, ((df['Orig_Price'] - df['Curr_Price']) / df['Orig_Price']) * 100, 0.0)
+    df['Discount_Pct'] = np.where(df['Discount_Pct'] < 0, 0.0, df['Discount_Pct'])
+
+    is_sku_clone = df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
+    if m['sku'] and m['sku'] in df.columns:
+        is_sku_clone = is_sku_clone | (df['Brand'] == df[m['sku']])
+        
+    df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
+
+    def normalize_sku(row):
+        s = str(row[m['sku']]).strip() if m['sku'] else "UNKNOWN"
+        if s.endswith('.0'): s = s[:-2]
+        if s.lower() not in ['nan', 'none', '', 'null', '0', 'unknown']: return s
+        if m.get('url') and pd.notna(row[m['url']]):
+            url = str(row[m['url']])
+            match = re.search(r'(?:variantCode|sku|id|pid)=([A-Za-z0-9_-]+)', url, re.IGNORECASE)
+            if match: return f"URL_{match.group(1).upper()}"
+            match_p = re.search(r'/p/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
+            if match_p: return f"URL_{match_p.group(1).upper()}"
+            
+        brand_clean = str(row['Brand']).strip().upper()
+        page_clean = str(row['Page'])
+        price_clean = str(row['Curr_Price'])
+        fingerprint = f"{brand_clean}_PG{page_clean}_{price_clean}"
+        if fingerprint != "GENERIC_PG1_0.0" and fingerprint != "UNKNOWN_PG1_0.0":
+            return fingerprint
+        return str(row['Name']).upper()
+        
+    df['SKU'] = df.apply(normalize_sku, axis=1)
+
+    def get_l1(row):
+        for key in ['c1', 'ret_cat', 'goo_l1']:
+            if m[key] and pd.notna(row[m[key]]):
+                val = str(row[m[key]]).strip()
+                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        return "General Merchandise"
+
+    def get_l2(row):
+        for key in ['c2', 'goo_l2']:
+            if m[key] and pd.notna(row[m[key]]):
+                val = str(row[m[key]]).strip()
+                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        return "Uncategorized Sub-Department"
+        
+    def get_l3(row):
+        for key in ['c3', 'goo_l3']:
+            if m[key] and pd.notna(row[m[key]]):
+                val = str(row[m[key]]).strip()
+                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        return "Uncategorized Item-Level"
+
+    df['L1_Category'] = df.apply(get_l1, axis=1)
+    df['L2_Category'] = df.apply(get_l2, axis=1)
+    df['L3_Category'] = df.apply(get_l3, axis=1)
+    
+    global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
+    
+    is_creative = df['Display_Type'].isin(['BANNER', 'LINK']) | df['Name'].str.contains('BANNER', case=False, na=False)
+    
+    df_prod = df[~is_creative].copy()
+    df_creative = df[is_creative].copy()
+    
+    return df_prod, df_creative, global_totals
+
+def extract_exact_metadata(df_clean):
+    try:
+        merchant = df_clean['Merchant Name'].dropna().iloc[0] if 'Merchant Name' in df_clean.columns else "Bumper to Bumper"
+        run_name = df_clean['Flyer Run Name'].dropna().iloc[0] if 'Flyer Run Name' in df_clean.columns else "Active Flight"
+        run_id = df_clean['Flyer Run ID'].dropna().iloc[0] if 'Flyer Run ID' in df_clean.columns else "N/A"
+        date_from = str(df_clean['Daily Available From'].dropna().iloc[0]).split()[0] if 'Daily Available From' in df_clean.columns else "N/A"
+        date_to = str(df_clean['Daily Available To'].dropna().iloc[0]).split()[0] if 'Daily Available To' in df_clean.columns else "N/A"
+        return merchant, run_name, str(run_id)[:-2] if str(run_id).endswith('.0') else str(run_id), date_from, date_to
+    except:
+        return "Bumper to Bumper", "Active Flight", "N/A", "N/A", "N/A"
+
+def extract_campaign_header_metadata(df):
+    merchant = df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in df.columns and len(df['Merchant Name'].dropna()) > 0 else "N/A"
+    run_name = ", ".join(df['Flyer Run Name'].dropna().astype(str).str.strip().unique()) if 'Flyer Run Name' in df.columns else "N/A"
+    run_id = ", ".join(df['Flyer Run ID'].dropna().astype(str).str.strip().unique()) if 'Flyer Run ID' in df.columns else "N/A"
+    
+    date_col = 'Weekly Date' if 'Weekly Date' in df.columns else ('Daily Date' if 'Daily Date' in df.columns else None)
+    if date_col and date_col in df.columns:
+        parsed_dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+        date_from = parsed_dates.min().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
+        date_to = parsed_dates.max().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
+    else:
+        date_from, date_to = "N/A", "N/A"
+        
+    return merchant, run_name, run_id, date_from, date_to
+
+def resolve_taxonomy_column_by_level(df, level):
+    if level == 1:
+        tier1 = ['Custom ID 1', 'Custom ID', 'Custom Category L1', 'Custom_ID_1']
+        tier2 = ['Retailer Category L1', 'Retailer Category', 'Category L1', 'Department L1', 'Dept L1']
+        tier3 = ['Google Category L1', 'L1_Category', 'Google Category']
+    elif level == 2:
+        tier1 = ['Custom ID 2', 'Custom Category L2', 'Custom_ID_2', 'Custom ID 1', 'Custom ID']
+        tier2 = ['Retailer Category L2', 'Retailer Subcategory', 'Category L2', 'Department L2', 'Dept L2', 'Retailer Category']
+        tier3 = ['Google Category L2', 'L2_Category', 'Google Category.1', 'Google Category L1', 'Google Category']
+    elif level == 3:
+        tier1 = ['Custom ID 3', 'Custom Category L3', 'Custom_ID_3', 'Custom ID 1', 'Custom ID']
+        tier2 = ['Retailer Category L3', 'Retailer Sub-subcategory', 'Category L3', 'Department L3', 'Dept L3', 'Retailer Category']
+        tier3 = ['Google Category L3', 'L3_Category', 'Google Category.2', 'Google Category L1', 'Google Category']
+    else:
+        return None, "N/A"
+
+    for col in tier1:
+        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Custom ID'
+    for col in tier2:
+        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Retailer Category'
+    for col in tier3:
+        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Google Category'
+
+    return None, "N/A"
+
+def parse_breadcrumb_level(val, level):
+    if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "uncategorized": return None
+    s = str(val).strip()
+    if '>' in s:
+        parts = [p.strip() for p in s.split('>')]
+        return parts[level - 1] if len(parts) >= level else None
+    return s if level == 1 else None
+
+def process_scroll_file(scroll_file, period_name=None):
+    file_bytes = scroll_file.read()
+    is_csv = scroll_file.name.lower().endswith('.csv')
+    df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
+        
+    header_idx = 0
+    for i in range(min(20, len(df_raw))):
+        if any(keyword in [str(x).lower().strip() for x in df_raw.iloc[i].values] for keyword in ['scroll depth', 'retention', 'readers', 'milestone', 'percentage']):
+            header_idx = i
+            break
+            
+    df_sc = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
+    df_sc.columns = [str(c).strip() for c in df_sc.columns]
+    cols_lower = [c.lower() for c in df_sc.columns]
+    
+    def get_sort_val(x):
+        s = str(x).lower()
+        if 'open' in s: return -1
+        if 'finish' in s or 'complete' in s: return 9999
+        nums = re.findall(r'\d+', s)
+        return float(nums[0]) if nums else 999
+
+    id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
+    if not id_col:
+        id_col = next((c for c in df_sc.columns if 'flyer run id' in c.lower()), None)
+    if not id_col: 
+        id_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['date', 'run', 'campaign', 'week', 'title'])), None)
+    
+    weekly_data = None
+    qbr_insights = None
+
+    if 'scroll depth' in cols_lower and 'cumulative readers' in cols_lower and 'total readers' in cols_lower:
+        get_exact = lambda name: next((c for c in df_sc.columns if c.lower() == name), None)
+        sd_col, pr_col, cr_col, tr_col = get_exact('scroll depth'), get_exact('pages read'), get_exact('cumulative readers'), get_exact('total readers')
+        
+        if pr_col: df_sc[pr_col] = pd.to_numeric(df_sc[pr_col], errors='coerce').fillna(0)
+        df_sc['sort_val'] = df_sc[sd_col].apply(get_sort_val)
+        
+        agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
+        agg['Retention'] = np.where(agg[tr_col] > 0, agg[cr_col] / agg[tr_col], 0)
+        agg = agg.sort_values('sort_val')
+        
+        if pr_col: agg['Approx Page'] = agg[pr_col].round(1)
+        else: agg['Approx Page'] = "N/A"
+        agg['Milestone'] = agg[sd_col]
+        
+        if id_col and df_sc[id_col].nunique() > 1:
+            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
+            week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
+            weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
+            
+            week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
+            vol_week = week_score.idxmax()
+            vol_score = week_score.max()
+
+            counts = weekly_data.groupby('Campaign/Week')['Milestone'].count()
+            valid_weeks = counts[counts > 2].index
+            if len(valid_weeks) == 0: valid_weeks = counts.index
+            
+            eff_scores = weekly_data[weekly_data['Campaign/Week'].isin(valid_weeks)].groupby('Campaign/Week')['Retention'].apply(lambda x: x.diff().mean())
+            eff_week = eff_scores.idxmax() 
+            eff_drop = abs(eff_scores.max()) if pd.notna(eff_scores.max()) else 0
+
+            hl_data = weekly_data[(weekly_data['Campaign/Week'] == vol_week) & (weekly_data['Retention'] < 0.50)]
+            hl_milestone = hl_data.iloc[0]['Milestone'] if not hl_data.empty else "Finished Flyer"
+                
+            qbr_insights = {
+                'vol_week': vol_week,
+                'vol_score': vol_score,
+                'eff_week': eff_week,
+                'eff_drop': eff_drop,
+                'hl_milestone': hl_milestone
+            }
+
+    else:
+        df_sc = df_sc.iloc[:, :3]
+        df_sc.columns = ['Milestone', 'Readers', 'Retention']
+        df_sc['Retention'] = pd.to_numeric(df_sc['Retention'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
+        df_sc['Retention'] = np.where(df_sc['Retention'] > 1, df_sc['Retention'] / 100, df_sc['Retention'])
+        df_sc['sort_val'] = df_sc['Milestone'].apply(get_sort_val)
+        agg = df_sc.dropna(subset=['Retention']).sort_values('sort_val').copy()
+        agg['Approx Page'] = "N/A"
+        
+    if period_name: agg['Period'] = period_name
+    
+    final_df = agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
+    return final_df, weekly_data, qbr_insights
+
+def render_insight_box(what, so_what, now_what):
+    st.markdown(f"""
+        <div class="insight-box">
+            <div class="insight-title">💡 Executive Summary & Strategic Insights</div>
+            <div class="insight-text"><b>What Happened:</b> {what}</div>
+            <div class="insight-text"><b>So What:</b> {so_what}</div>
+            <div class="insight-text"><b>Now What:</b> {now_what}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+# ==============================================================================
+# 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN
 # ==============================================================================
 def render_single_campaign_matrix():
-    import pandas as pd
-    import numpy as np
-    import io
-    import re
-    import plotly.express as px
-    import streamlit as st
-
     def normalize_sale_story(val):
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() in ["nan", "none", "uncategorized / standard", "uncategorized"]:
             return "no badge"
@@ -192,7 +513,6 @@ def render_single_campaign_matrix():
         s = str(text).strip()
         return mapping_dict.get(s.lower(), s)
 
-    # Ingest & Combine Merchandise Datasets
     if merch_files:
         df_clean = parse_and_combine_multiple_files(merch_files)
 
@@ -308,7 +628,6 @@ def render_single_campaign_matrix():
         except Exception as e:
             st.warning(f"Could not process the scroll file. Error: {str(e)}")
 
-    # Excel Download Generator
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         wrote_any = False
@@ -642,8 +961,9 @@ def render_single_campaign_matrix():
             {f'* {diagnostic_text}' if diagnostic_text else ''}
             * **The Loyalists:** You successfully carried **{final_ret:.1%}** of your audience to the very end of the campaign. The back pages remain an excellent location for niche, high-research, or long-tail product categories.
             """)
+
 # ==============================================================================
-# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON (PERSISTENT & FAST)
+# 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON
 # ==============================================================================
 def render_head_to_head_variance():
     st.write("---")
@@ -675,11 +995,11 @@ def render_head_to_head_variance():
     if st.session_state.run_h2h:
         export_sheets = {}
 
-        df_base = parse_large_file(base_merch_file.getvalue(), base_merch_file.name) if base_merch_file else pd.DataFrame()
-        df_new = parse_large_file(new_merch_file.getvalue(), new_merch_file.name) if new_merch_file else pd.DataFrame()
+        df_base = parse_and_combine_multiple_files([base_merch_file]) if base_merch_file else pd.DataFrame()
+        df_new = parse_and_combine_multiple_files([new_merch_file]) if new_merch_file else pd.DataFrame()
         
-        f_base = parse_large_file(base_funnel_file.getvalue(), base_funnel_file.name) if base_funnel_file else pd.DataFrame()
-        f_new = parse_large_file(new_funnel_file.getvalue(), new_funnel_file.name) if new_funnel_file else pd.DataFrame()
+        f_base = parse_and_combine_multiple_files([base_funnel_file]) if base_funnel_file else pd.DataFrame()
+        f_new = parse_and_combine_multiple_files([new_funnel_file]) if new_funnel_file else pd.DataFrame()
 
         # 1. FUNNEL ANALYSIS
         if not f_base.empty and not f_new.empty:
@@ -1035,12 +1355,12 @@ def render_benchmark_scorecard():
     dl_placeholder.download_button(
         label="⬇️ Download Benchmark Scorecard (.xlsx)",
         data=output,
-        file_name=f"Benchmark_Scorecard.xlsx",
+        file_name="Benchmark_Scorecard.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
     st.write("---")
-    st.subheader(f"🎯 The Executive Scorecard vs Industry Average")
+    st.subheader("🎯 The Executive Scorecard vs Industry Average")
     sc1, sc2, sc3 = st.columns(3)
     sc1.metric(label="Client Avg. Item CTR", value=f"{c_item_ctr:.2%}", delta=f"{c_item_ctr - b_item_ctr:+.2%} pts vs Benchmark")
     sc2.metric(label="Client Marketing Banner CTR", value=f"{c_bnr_ctr:.2%}", delta=f"{c_bnr_ctr - b_bnr_ctr:+.2%} pts vs Benchmark")
@@ -1057,7 +1377,7 @@ def load_usps_reference(path):
         df = pd.read_excel(path, dtype=str)
     df.columns = [str(c).strip() for c in df.columns]
     return df.loc[:, ~df.columns.duplicated()]
-    
+
 def render_taylors_workspace():
     st.markdown("<div class='main-header'>🧰 Taylor's Regional CTR Engine</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload your Merch Metrics and FSA Zone file(s) to instantly join and calculate regional performance. The USPS reference is loaded automatically from the server. No VLOOKUPs required.</div>", unsafe_allow_html=True)
@@ -1065,12 +1385,14 @@ def render_taylors_workspace():
     dl_placeholder = st.empty()
 
     col1, col2 = st.columns(2)
-    with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"])
-    with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True)
+    with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"], key="taylor_merch")
+    with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True, key="taylor_fsa")
 
-    usps_path_xlsx = "reference_data/usps_reference.xlsx"
+    # Define paths strictly before checking existence
     usps_path_csv = "reference_data/usps_reference.csv"
+    usps_path_xlsx = "reference_data/usps_reference.xlsx"
     usps_path = None
+
     if os.path.exists(usps_path_csv):
         usps_path = usps_path_csv
     elif os.path.exists(usps_path_xlsx):

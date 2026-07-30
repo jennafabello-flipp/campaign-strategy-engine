@@ -1257,8 +1257,34 @@ def render_head_to_head_variance():
 
             st.dataframe(df_funnel_summary.style.map(color_variance_cells), use_container_width=True, hide_index=True)
 
-        # --- MACRO SUMMARY TABLE (ITEMS + LINKS) ---
-            if 'Views' in df_base.columns and 'Clicks' in df_base.columns:
+        # ---------------------------------------------------------
+        # 🛒 2. MERCHANDISE & MARKETING LINK PROCESSING
+        # ---------------------------------------------------------
+        if base_merch_file and new_merch_file:
+            st.success("Both Merchandise files loaded! Calculating Head-to-Head Performance...")
+
+            def load_merch_data(file):
+                df = load_generic_data(file)
+                if df is None or df.empty:
+                    return pd.DataFrame()
+                
+                rename_map = {
+                    'Total Item Views': 'Views',
+                    'Item Views': 'Views',
+                    'Total Item Clicks': 'Clicks',
+                    'Item Clicks': 'Clicks',
+                    'Total Transfer to Merchant (TTMs)': 'TTMs',
+                    'Item TTMs': 'TTMs',
+                    'Total TTMs': 'TTMs'
+                }
+                df.rename(columns=rename_map, inplace=True)
+                return df
+
+            df_base = load_merch_data(base_merch_file)
+            df_new = load_merch_data(new_merch_file)
+
+            # Safely check if dataframes were successfully created
+            if not df_base.empty and not df_new.empty and 'Views' in df_base.columns and 'Clicks' in df_base.columns:
                 st.write("---")
                 st.subheader("📈 Macro Item & Marketing Link Performance Comparison")
 
@@ -1281,20 +1307,24 @@ def render_head_to_head_variance():
                 n_items, n_links = split_items_and_links(df_new)
 
                 # Base Calculations
-                b_item_v, b_item_cl = b_items['Views'].sum() if not b_items.empty else 0, b_items['Clicks'].sum() if not b_items.empty else 0
+                b_item_v = b_items['Views'].sum() if not b_items.empty else 0
+                b_item_cl = b_items['Clicks'].sum() if not b_items.empty else 0
                 b_item_ttm = b_items['TTMs'].sum() if not b_items.empty and 'TTMs' in b_items.columns else 0
                 
-                b_link_v, b_link_cl = b_links['Views'].sum() if not b_links.empty else 0, b_links['Clicks'].sum() if not b_links.empty else 0
+                b_link_v = b_links['Views'].sum() if not b_links.empty else 0
+                b_link_cl = b_links['Clicks'].sum() if not b_links.empty else 0
                 b_link_ttm = b_links['TTMs'].sum() if not b_links.empty and 'TTMs' in b_links.columns else 0
 
                 # Current Calculations
-                n_item_v, n_item_cl = n_items['Views'].sum() if not n_items.empty else 0, n_items['Clicks'].sum() if not n_items.empty else 0
+                n_item_v = n_items['Views'].sum() if not n_items.empty else 0
+                n_item_cl = n_items['Clicks'].sum() if not n_items.empty else 0
                 n_item_ttm = n_items['TTMs'].sum() if not n_items.empty and 'TTMs' in n_items.columns else 0
 
-                n_link_v, n_link_cl = n_links['Views'].sum() if not n_links.empty else 0, n_links['Clicks'].sum() if not n_links.empty else 0
+                n_link_v = n_links['Views'].sum() if not n_links.empty else 0
+                n_link_cl = n_links['Clicks'].sum() if not n_links.empty else 0
                 n_link_ttm = n_links['TTMs'].sum() if not n_links.empty and 'TTMs' in n_links.columns else 0
 
-                # Total Combined Calculations
+                # Combined Totals
                 b_tot_v, b_tot_cl, b_tot_ttm = b_item_v + b_link_v, b_item_cl + b_link_cl, b_item_ttm + b_link_ttm
                 n_tot_v, n_tot_cl, n_tot_ttm = n_item_v + n_link_v, n_item_cl + n_link_cl, n_item_ttm + n_link_ttm
 
@@ -1311,7 +1341,7 @@ def render_head_to_head_variance():
                 def get_variance(new_val, base_val):
                     return (new_val - base_val) / base_val if base_val > 0 else 0.0
 
-                # Construct Summary DataFrame incorporating both Items and Links
+                # Summary Table Generation
                 summary_data = {
                     "Asset Category": [
                         "🛒 Products (Items)", "🛒 Products (Items)", "🛒 Products (Items)",

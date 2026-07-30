@@ -1,396 +1,94 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import io
-import re
-import os
 import gc
-
-# Create the hidden directories on the server if they don't exist
-if not os.path.exists("benchmarks"):
-    os.makedirs("benchmarks")
-if not os.path.exists("reference_data"):
-    os.makedirs("reference_data")
+import re
+import streamlit as st
 
 # ==============================================================================
-# 🚀 SETUP & CONFIGURATION
+# ⚡ MULTI-FILE BATCH PARSER & COMBINER (RAM Optimized)
 # ==============================================================================
-st.set_page_config(
-    page_title="Enterprise Campaign Strategy Engine",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.markdown("""
-    <style>
-    .main-header { color: #002551; font-weight: 800; font-size: 28px; margin-bottom: 5px; }
-    .sub-header { color: #475569; font-size: 14px; margin-bottom: 25px; }
-    .metric-card { background-color: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; text-align: center; }
-    .metric-val { color: #0054B7; font-size: 24px; font-weight: bold; }
-    .metric-lbl { color: #64748b; font-size: 12px; font-weight: bold; }
-    .insight-box { background-color: #f0fdf4; border-left: 5px solid #16a34a; padding: 20px; border-radius: 5px; margin-bottom: 25px; }
-    .insight-title { color: #166534; font-weight: 800; font-size: 18px; margin-bottom: 10px; }
-    .insight-text { color: #1f2937; font-size: 15px; line-height: 1.5; margin-bottom: 15px;}
-    </style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
-# ⚡ GLOBAL HIGH-CAPACITY FILE PARSER (Handles files up to 1 GB)
-# ==============================================================================
-@st.cache_data(show_spinner="⚡ Parsing dataset (Memory Optimized for Large Files)...")
-def parse_large_file(file_bytes, file_name):
+@st.cache_data(show_spinner="⚡ Batch processing and combining files...")
+def parse_and_combine_multiple_files(uploaded_files):
     """
-    Streams and parses CSV/Excel files up to 1 GB in memory-efficient chunks.
-    Downcasts numeric types and filters target columns to keep RAM under 100 MB.
+    Sequentially reads multiple uploaded CSV or XLSX files, normalizes columns,
+    reduces RAM footprint per file, and concatenates them into one DataFrame.
     """
-    if not file_bytes:
+    if not uploaded_files:
         return pd.DataFrame()
-        
-    buffer = io.BytesIO(file_bytes)
+
+    processed_chunks = []
     
     target_columns = [
         'SKU', 'Clean_Name', 'Merchandise Name', 'Name', 'Item Name',
         'Total Item Views', 'Item Views', 'Views',
         'Total Item Clicks', 'Item Clicks', 'Clicks',
         'Total Transfer to Merchant (TTMs)', 'Item TTMs', 'Total TTMs', 'TTMs',
-        'Page Position', 'Page', 'Display Type', 'Category', 'Retailer Category', 'Department'
+        'Page Position', 'Page', 'Display Type', 'Category', 'Retailer Category', 'Department',
+        'Flyer Run Name', 'Flyer Run ID', 'Brand', 'Daily Available From', 'Weekly Date'
     ]
 
-    try:
-        if file_name.lower().endswith('.csv'):
-            preview = pd.read_csv(buffer, header=None, nrows=15)
-            header_row = 0
-            for idx, row in preview.iterrows():
-                row_vals = [str(val).strip() for val in row.values if pd.notna(val)]
-                if any(k in row_vals for k in ['Weekly Date', 'Daily Date', 'Flyer Run Name', 'Page Position', 'SKU', 'Name', 'Merchandise Name']):
-                    header_row = idx
-                    break
+    for file in uploaded_files:
+        try:
+            file_bytes = file.getvalue()
+            buffer = io.BytesIO(file_bytes)
+            file_name = file.name.lower()
 
-            buffer.seek(0)
-            cols_in_file = pd.read_csv(buffer, header=header_row, nrows=1).columns.astype(str).str.strip()
-            use_cols = [c for c in cols_in_file if c in target_columns or any(t in c.lower() for t in ['views', 'clicks', 'ttm', 'sku', 'name', 'page', 'category'])]
+            if file_name.endswith('.csv'):
+                preview = pd.read_csv(buffer, header=None, nrows=15)
+                header_row = 0
+                for idx, row in preview.iterrows():
+                    row_vals = [str(val).strip() for val in row.values if pd.notna(val)]
+                    if any(k in row_vals for k in ['Weekly Date', 'Daily Date', 'Flyer Run Name', 'Page Position', 'SKU', 'Name', 'Merchandise Name']):
+                        header_row = idx
+                        break
 
-            buffer.seek(0)
-            chunks = []
-            chunk_iter = pd.read_csv(
-                buffer,
-                header=header_row,
-                usecols=use_cols if use_cols else None,
-                chunksize=50000,
-                engine='c',
-                low_memory=False
-            )
-            
-            for chunk in chunk_iter:
-                chunk.columns = chunk.columns.astype(str).str.strip()
-                chunks.append(chunk)
+                buffer.seek(0)
+                cols_in_file = pd.read_csv(buffer, header=header_row, nrows=1).columns.astype(str).str.strip()
+                use_cols = [c for c in cols_in_file if c in target_columns or any(t in c.lower() for t in ['views', 'clicks', 'ttm', 'sku', 'name', 'page', 'category'])]
 
-            df = pd.concat(chunks, ignore_index=True)
-            del chunks
-            gc.collect()
+                buffer.seek(0)
+                df = pd.read_csv(buffer, header=header_row, usecols=use_cols if use_cols else None, low_memory=False)
+            else:
+                # Excel file loading
+                df = pd.read_excel(buffer)
 
-        else:
-            df = pd.read_excel(buffer)
             df.columns = df.columns.astype(str).str.strip()
 
-        # Standardize metric names
-        rename_map = {
-            'Total Item Views': 'Views', 'Item Views': 'Views',
-            'Total Item Clicks': 'Clicks', 'Item Clicks': 'Clicks',
-            'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs'
-        }
-        df.rename(columns=rename_map, inplace=True)
-
-        for col in ['Views', 'Clicks', 'TTMs']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int32')
-            else:
-                df[col] = 0
-
-        gc.collect()
-        return df
-
-    except Exception as e:
-        st.error(f"⚠️ Error parsing file `{file_name}`: {str(e)}")
-        return pd.DataFrame()
-
-# ==============================================================================
-# 🧹 ARMORED AUTO-SCRUBBER ENGINE
-# ==============================================================================
-def clean_bilingual_suffix(name_str):
-    if pd.isna(name_str): return "Unnamed Asset"
-    return re.sub(r'(?i)[-_ ]+(FR|EN)\b', '', str(name_str)).strip()
-
-def scrub_and_load_excel(file_obj, is_local_path=False):
-    if file_obj is None: return None, None, None
-    try:
-        if is_local_path:
-            is_csv = file_obj.lower().endswith('.csv')
-            with open(file_obj, 'rb') as f:
-                file_bytes = f.read()
-        else:
-            file_bytes = file_obj.read()
-            is_csv = file_obj.name.lower().endswith('.csv')
-            
-        df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
-            
-        header_idx = 0
-        for i in range(min(30, len(df_raw))):
-            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values]
-            if 'merchandise name' in row_vals or 'total item views' in row_vals or 'sku' in row_vals:
-                header_idx = i
-                break
-                
-        df_clean = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
-        df_clean.columns = [str(c).strip() for c in df_clean.columns]
-
-        def get_col(exact_names):
-            for exact in exact_names:
-                for col in df_clean.columns:
-                    if exact.lower() == col.lower(): return col
-            for exact in exact_names:
-                for col in df_clean.columns:
-                    if exact.lower() in col.lower(): return col
-            return None
-
-        mapping = {
-            'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
-            'date': get_col(['Daily Available From', 'Date', 'Start Date']),
-            'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
-            'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
-            'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
-            'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
-            'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
-            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']),
-            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']), 'goo_l3': get_col(['Google Category L3']),
-            'views': get_col(['Total Item Views', 'Views']), 'clicks': get_col(['Total Item Clicks', 'Clicks']),
-            'clips': get_col(['Total Clippings', 'Clips']), 'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTMS'])
-        }
-        return df_clean, mapping, header_idx
-    except Exception as e:
-        st.error(f"Error scrubbing file setup: {str(e)}")
-        return None, None, None
-
-def process_metrics(df, m):
-    df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
-    df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] else "PRODUCT"
-    df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] else 1
-    df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
-    df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') else pd.NaT
-    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN"
-    df['Flyer_Description'] = df[m['run_name']].astype(str) if m.get('run_name') else df['Run_ID']
-    
-    def safe_numeric(col_name):
-        if m[col_name] and m[col_name] in df.columns:
-            cleaned = df[m[col_name]].astype(str).str.replace(r'[^\d.]', '', regex=True).replace('', '0')
-            return pd.to_numeric(cleaned, errors='coerce').fillna(0)
-        return 0
-
-    df['Views'], df['Clicks'], df['Clips'], df['TTMs'] = safe_numeric('views'), safe_numeric('clicks'), safe_numeric('clips'), safe_numeric('ttms')
-    df['Orig_Price'], df['Curr_Price'] = safe_numeric('orig_price'), safe_numeric('curr_price')
-    df['Discount_Pct'] = np.where(df['Orig_Price'] > 0, ((df['Orig_Price'] - df['Curr_Price']) / df['Orig_Price']) * 100, 0.0)
-    df['Discount_Pct'] = np.where(df['Discount_Pct'] < 0, 0.0, df['Discount_Pct'])
-
-    is_sku_clone = df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
-    if m['sku'] and m['sku'] in df.columns:
-        is_sku_clone = is_sku_clone | (df['Brand'] == df[m['sku']])
-        
-    df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
-
-    def normalize_sku(row):
-        s = str(row[m['sku']]).strip() if m['sku'] else "UNKNOWN"
-        if s.endswith('.0'): s = s[:-2]
-        if s.lower() not in ['nan', 'none', '', 'null', '0', 'unknown']: return s
-        if m.get('url') and pd.notna(row[m['url']]):
-            url = str(row[m['url']])
-            match = re.search(r'(?:variantCode|sku|id|pid)=([A-Za-z0-9_-]+)', url, re.IGNORECASE)
-            if match: return f"URL_{match.group(1).upper()}"
-            match_p = re.search(r'/p/([A-Za-z0-9_-]+)', url, re.IGNORECASE)
-            if match_p: return f"URL_{match_p.group(1).upper()}"
-            
-        brand_clean = str(row['Brand']).strip().upper()
-        page_clean = str(row['Page'])
-        price_clean = str(row['Curr_Price'])
-        fingerprint = f"{brand_clean}_PG{page_clean}_{price_clean}"
-        if fingerprint != "GENERIC_PG1_0.0" and fingerprint != "UNKNOWN_PG1_0.0":
-            return fingerprint
-        return str(row['Name']).upper()
-        
-    df['SKU'] = df.apply(normalize_sku, axis=1)
-
-    def get_l1(row):
-        for key in ['c1', 'ret_cat', 'goo_l1']:
-            if m[key] and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
-        return "General Merchandise"
-
-    def get_l2(row):
-        for key in ['c2', 'goo_l2']:
-            if m[key] and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
-        return "Uncategorized Sub-Department"
-        
-    def get_l3(row):
-        for key in ['c3', 'goo_l3']:
-            if m[key] and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
-        return "Uncategorized Item-Level"
-
-    df['L1_Category'] = df.apply(get_l1, axis=1)
-    df['L2_Category'] = df.apply(get_l2, axis=1)
-    df['L3_Category'] = df.apply(get_l3, axis=1)
-    
-    global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
-    
-    is_creative = df['Display_Type'].isin(['BANNER', 'LINK']) | df['Name'].str.contains('BANNER', case=False, na=False)
-    
-    df_prod = df[~is_creative].copy()
-    df_creative = df[is_creative].copy()
-    
-    return df_prod, df_creative, global_totals
-
-def extract_exact_metadata(df_clean):
-    try:
-        merchant = df_clean['Merchant Name'].dropna().iloc[0] if 'Merchant Name' in df_clean.columns else "Bumper to Bumper"
-        run_name = df_clean['Flyer Run Name'].dropna().iloc[0] if 'Flyer Run Name' in df_clean.columns else "Active Flight"
-        run_id = df_clean['Flyer Run ID'].dropna().iloc[0] if 'Flyer Run ID' in df_clean.columns else "N/A"
-        date_from = str(df_clean['Daily Available From'].dropna().iloc[0]).split()[0] if 'Daily Available From' in df_clean.columns else "N/A"
-        date_to = str(df_clean['Daily Available To'].dropna().iloc[0]).split()[0] if 'Daily Available To' in df_clean.columns else "N/A"
-        return merchant, run_name, str(run_id)[:-2] if str(run_id).endswith('.0') else str(run_id), date_from, date_to
-    except:
-        return "Bumper to Bumper", "Active Flight", "N/A", "N/A", "N/A"
-
-def process_scroll_file(scroll_file, period_name=None):
-    file_bytes = scroll_file.read()
-    is_csv = scroll_file.name.lower().endswith('.csv')
-    df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
-        
-    header_idx = 0
-    for i in range(min(20, len(df_raw))):
-        if any(keyword in [str(x).lower().strip() for x in df_raw.iloc[i].values] for keyword in ['scroll depth', 'retention', 'readers', 'milestone', 'percentage']):
-            header_idx = i
-            break
-            
-    df_sc = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
-    df_sc.columns = [str(c).strip() for c in df_sc.columns]
-    cols_lower = [c.lower() for c in df_sc.columns]
-    
-    def get_sort_val(x):
-        s = str(x).lower()
-        if 'open' in s: return -1
-        if 'finish' in s or 'complete' in s: return 9999
-        nums = re.findall(r'\d+', s)
-        return float(nums[0]) if nums else 999
-
-    id_col = next((c for c in df_sc.columns if 'flyer run name' in c.lower()), None)
-    if not id_col:
-        id_col = next((c for c in df_sc.columns if 'flyer run id' in c.lower()), None)
-    if not id_col: 
-        id_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['date', 'run', 'campaign', 'week', 'title'])), None)
-    
-    weekly_data = None
-    qbr_insights = None
-
-    if 'scroll depth' in cols_lower and 'cumulative readers' in cols_lower and 'total readers' in cols_lower:
-        get_exact = lambda name: next((c for c in df_sc.columns if c.lower() == name), None)
-        sd_col, pr_col, cr_col, tr_col = get_exact('scroll depth'), get_exact('pages read'), get_exact('cumulative readers'), get_exact('total readers')
-        
-        if pr_col: df_sc[pr_col] = pd.to_numeric(df_sc[pr_col], errors='coerce').fillna(0)
-        df_sc['sort_val'] = df_sc[sd_col].apply(get_sort_val)
-        
-        agg = df_sc.groupby(sd_col).agg({pr_col: 'mean' if pr_col else 'first', cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
-        agg['Retention'] = np.where(agg[tr_col] > 0, agg[cr_col] / agg[tr_col], 0)
-        agg = agg.sort_values('sort_val')
-        
-        if pr_col: agg['Approx Page'] = agg[pr_col].round(1)
-        else: agg['Approx Page'] = "N/A"
-        agg['Milestone'] = agg[sd_col]
-        
-        if id_col and df_sc[id_col].nunique() > 1:
-            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
-            week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
-            weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
-            
-            week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
-            vol_week = week_score.idxmax()
-            vol_score = week_score.max()
-
-            counts = weekly_data.groupby('Campaign/Week')['Milestone'].count()
-            valid_weeks = counts[counts > 2].index
-            if len(valid_weeks) == 0: valid_weeks = counts.index
-            
-            eff_scores = weekly_data[weekly_data['Campaign/Week'].isin(valid_weeks)].groupby('Campaign/Week')['Retention'].apply(lambda x: x.diff().mean())
-            eff_week = eff_scores.idxmax() 
-            eff_drop = abs(eff_scores.max()) if pd.notna(eff_scores.max()) else 0
-
-            hl_data = weekly_data[(weekly_data['Campaign/Week'] == vol_week) & (weekly_data['Retention'] < 0.50)]
-            hl_milestone = hl_data.iloc[0]['Milestone'] if not hl_data.empty else "Finished Flyer"
-                
-            qbr_insights = {
-                'vol_week': vol_week,
-                'vol_score': vol_score,
-                'eff_week': eff_week,
-                'eff_drop': eff_drop,
-                'hl_milestone': hl_milestone
+            # Standardize core columns
+            rename_map = {
+                'Total Item Views': 'Views', 'Item Views': 'Views',
+                'Total Item Clicks': 'Clicks', 'Item Clicks': 'Clicks',
+                'Total Transfer to Merchant (TTMs)': 'TTMs', 'Item TTMs': 'TTMs', 'Total TTMs': 'TTMs'
             }
+            df.rename(columns=rename_map, inplace=True)
 
-    else:
-        df_sc = df_sc.iloc[:, :3]
-        df_sc.columns = ['Milestone', 'Readers', 'Retention']
-        df_sc['Retention'] = pd.to_numeric(df_sc['Retention'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
-        df_sc['Retention'] = np.where(df_sc['Retention'] > 1, df_sc['Retention'] / 100, df_sc['Retention'])
-        df_sc['sort_val'] = df_sc['Milestone'].apply(get_sort_val)
-        agg = df_sc.dropna(subset=['Retention']).sort_values('sort_val').copy()
-        agg['Approx Page'] = "N/A"
-        
-    if period_name: agg['Period'] = period_name
-    
-    final_df = agg[['Milestone', 'Retention', 'Approx Page', 'Period'] if period_name else ['Milestone', 'Retention', 'Approx Page']]
-    return final_df, weekly_data, qbr_insights
+            # Standardize numeric columns to int32 to save 75% memory
+            for col in ['Views', 'Clicks', 'TTMs']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype('int32')
+                else:
+                    df[col] = 0
 
-def generate_h2h_insight(gloA, gloB, cat_m_l1):
-    v_del = (gloB['views'] - gloA['views']) / gloA['views'] if gloA['views'] > 0 else 0
-    c_del = (gloB['clicks'] - gloA['clicks']) / gloA['clicks'] if gloA['clicks'] > 0 else 0
-    
-    dir_v = "an increase" if v_del > 0 else "a decline"
-    dir_c = "an increase" if c_del > 0 else "a decline"
-    what = f"The Variant campaign saw **{dir_v} of {abs(v_del):.1%}** in total views, driving **{dir_c} of {abs(c_del):.1%}** in item clicks compared to the Base."
-    
-    if v_del > 0 and c_del > v_del:
-        so_what = "Audience reach expanded, and engagement outpaced that growth. The assortment and pricing strategy were highly relevant to the newly acquired traffic."
-    elif v_del > 0 and c_del <= 0:
-        so_what = "Audience reach expanded, but overall engagement declined. This indicates traffic quality issues or an assortment that failed to resonate with the broader audience."
-    elif v_del < 0 and c_del > 0:
-        so_what = "Despite a smaller audience footprint, engagement actually increased. The traffic was highly qualified and the assortment was extremely relevant, but top-of-funnel reach needs addressing."
-    else:
-        so_what = "Both reach and engagement contracted. The flight experienced macro-level headwinds, requiring a review of both traffic acquisition and merchandising strategy."
-        
-    if not cat_m_l1.empty:
-        cat_m_l1['Efficiency'] = cat_m_l1['Alloc Variant %'] - cat_m_l1['Alloc Base %']
-        top_cat = cat_m_l1.loc[cat_m_l1['Allocation Shift'].idxmax()]['L1_Category']
-        now_what = f"**1. Reallocate Space:** The '{top_cat}' category saw the highest positive shift in user click share. Consider increasing its footprint in the next flyer.<br>**2. Audit Product Churn:** Review the 'YoY Assortment Turnover' table below to verify if the newly introduced SKUs actually outperformed the items retired from the Base year."
-    else:
-        now_what = "Review the 'YoY Assortment Turnover' to verify if the newly introduced SKUs actually outperformed the retired items."
-        
-    return what, so_what, now_what
+            processed_chunks.append(df)
+            
+            # Immediate Garbage Collection between files
+            del file_bytes, buffer, df
+            gc.collect()
 
-def render_insight_box(what, so_what, now_what):
-    st.markdown(f"""
-        <div class="insight-box">
-            <div class="insight-title">💡 Executive Summary & Strategic Insights</div>
-            <div class="insight-text"><b>What Happened:</b> {what}</div>
-            <div class="insight-text"><b>So What:</b> {so_what}</div>
-            <div class="insight-text"><b>Now What:</b> {now_what}</div>
-        </div>
-    """, unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"⚠️ Could not process file `{file.name}`: {str(e)}")
+
+    if processed_chunks:
+        combined_df = pd.concat(processed_chunks, ignore_index=True)
+        del processed_chunks
+        gc.collect()
+        return combined_df
+    
+    return pd.DataFrame()
 
 # ==============================================================================
-# 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN (STREAMING & FAST)
+# 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN (COMPLETE REPLACEMENT)
 # ==============================================================================
 def render_single_campaign_matrix():
     import pandas as pd
@@ -440,9 +138,7 @@ def render_single_campaign_matrix():
         if 'TTMs' not in df_cr.columns: df_cr['TTMs'] = 0
 
         cr_grouped = df_cr.groupby(['Clean_Name', 'Page'], observed=False).agg(
-            Views=('Views', 'sum'),
-            Clicks=('Clicks', 'sum'),
-            TTMs=('TTMs', 'sum')
+            Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), TTMs=('TTMs', 'sum')
         ).reset_index()
 
         cr_grouped.rename(columns={'Clean_Name': 'Name'}, inplace=True)
@@ -451,16 +147,27 @@ def render_single_campaign_matrix():
         return cr_grouped.sort_values(by=['TTMs', 'Clicks'], ascending=False)
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload raw exports directly to analyze campaign performance across any selected flight package or timeframe.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload raw exports directly (single file or split files). The engine will process and combine them automatically.</div>", unsafe_allow_html=True)
     
     dl_placeholder = st.empty()
     
     col1, col2 = st.columns(2)
-    with col1: merch_file = st.file_uploader("📁 Upload Merchandise File (.xlsx/.csv)", type=["xlsx", "csv"], key="m1_merch")
-    with col2: scroll_file = st.file_uploader("📉 Upload Scroll Depth File (.xlsx/.csv)", type=["xlsx", "csv"], key="m1_scroll")
+    with col1: 
+        merch_files = st.file_uploader(
+            "📁 Upload Merchandise Files (Multiple Allowed)", 
+            type=["xlsx", "csv"], 
+            accept_multiple_files=True, 
+            key="m1_multi_merch"
+        )
+    with col2: 
+        scroll_file = st.file_uploader(
+            "📉 Upload Scroll Depth File (.xlsx/.csv)", 
+            type=["xlsx", "csv"], 
+            key="m1_single_scroll"
+        )
         
-    if not merch_file and not scroll_file:
-        st.info("⚠️ **Waiting for data:** Please upload a Merchandise file, a Scroll Depth file, or both to begin analysis.")
+    if not merch_files and not scroll_file:
+        st.info("⚠️ **Waiting for data:** Please upload one or more Merchandise or Scroll Depth files to begin analysis.")
         return
 
     pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = s_agg_sorted = pd.DataFrame()
@@ -470,86 +177,208 @@ def render_single_campaign_matrix():
     src_l1 = src_l2 = src_l3 = "N/A"
     col_sale_story = None
 
-    # ⚙️ FAST MEMORY-OPTIMIZED FILE PARSER
-    if merch_file:
-        df_clean = parse_large_file(merch_file.getvalue(), merch_file.name)
+    bilingual_category_map = {
+        'extérieur et jardin': 'Outdoor & Garden', 'matériaux de construction': 'Building Materials',
+        'chauffage, climatisation et ventilation': 'Heating, Cooling & Ventilation', 'couvre-plancher': 'Flooring',
+        'salle de bains': 'Bathroom', 'peinture': 'Paint', 'portes et fenêtres': 'Doors & Windows',
+        'meubles et décor': 'Furniture & Decoration', 'quincaillerie': 'Hardware', 'nouveautés': 'New arrivals',
+        'rangement et nettoyage': 'Storage & Cleaning', 'outils': 'Tools', 'automobile': 'Automotive',
+        'cuisine': 'Kitchen', 'plomberie': 'Plumbing', 'électricité et luminaires': 'Electrical & Lighting',
+        "produits d'ici": 'Local Products', 'product from here': 'Local Products'
+    }
+
+    def normalize_text_bilingual(text, mapping_dict):
+        if not text or pd.isna(text): return "Uncategorized / Standard"
+        s = str(text).strip()
+        return mapping_dict.get(s.lower(), s)
+
+    # Ingest & Combine Merchandise Datasets
+    if merch_files:
+        df_clean = parse_and_combine_multiple_files(merch_files)
+
         if not df_clean.empty:
-            # Split Products vs Creative Banners
-            item_col = 'Clean_Name' if 'Clean_Name' in df_clean.columns else ('Merchandise Name' if 'Merchandise Name' in df_clean.columns else 'Name')
-            if item_col not in df_clean.columns:
-                df_clean['Clean_Name'] = df_clean.iloc[:, 0].astype(str)
-                item_col = 'Clean_Name'
-
-            if 'SKU' in df_clean.columns:
-                has_sku = df_clean['SKU'].notna() & (df_clean['SKU'].astype(str).str.strip() != '') & (df_clean['SKU'].astype(str).str.strip().str.lower() != 'nan')
-                df_prod = df_clean[has_sku].copy()
-                df_creative = df_clean[~has_sku].copy()
-            elif 'Display Type' in df_clean.columns:
-                is_link = df_clean['Display Type'].astype(str).str.contains('Banner|Header|Creative|Hero|Link', case=False, na=False)
-                df_prod = df_clean[~is_link].copy()
-                df_creative = df_clean[is_link].copy()
-            else:
-                df_prod = df_clean.copy()
-                df_creative = pd.DataFrame()
-
-            if 'Brand' not in df_prod.columns: df_prod['Brand'] = 'UNKNOWN'
-            if 'Page' not in df_prod.columns and 'Page Position' in df_prod.columns: df_prod['Page'] = df_prod['Page Position']
-            if 'Page' not in df_prod.columns: df_prod['Page'] = 1
-
-            global_totals = {
-                'views': df_clean['Views'].sum(),
-                'clicks': df_clean['Clicks'].sum(),
-                'clips': df_clean['Clips'].sum() if 'Clips' in df_clean.columns else 0,
-                'ttms': df_clean['TTMs'].sum()
+            m = {
+                'sku': 'SKU' if 'SKU' in df_clean.columns else None,
+                'name': 'Name' if 'Name' in df_clean.columns else ('Merchandise Name' if 'Merchandise Name' in df_clean.columns else None),
+                'date': 'Daily Available From' if 'Daily Available From' in df_clean.columns else None,
+                'run_id': 'Flyer Run ID' if 'Flyer Run ID' in df_clean.columns else None,
+                'run_name': 'Flyer Run Name' if 'Flyer Run Name' in df_clean.columns else None,
+                'display_type': 'Display Type' if 'Display Type' in df_clean.columns else None,
+                'page': 'Page Position' if 'Page Position' in df_clean.columns else ('Page' if 'Page' in df_clean.columns else None),
+                'brand': 'Brand' if 'Brand' in df_clean.columns else None,
+                'orig_price': 'Total Original Price' if 'Total Original Price' in df_clean.columns else None,
+                'curr_price': 'Total Current Price' if 'Total Current Price' in df_clean.columns else None,
+                'url': 'URL' if 'URL' in df_clean.columns else None,
+                'c1': 'Custom ID 1' if 'Custom ID 1' in df_clean.columns else None,
+                'c2': 'Custom ID 2' if 'Custom ID 2' in df_clean.columns else None,
+                'c3': 'Custom ID 3' if 'Custom ID 3' in df_clean.columns else None,
+                'ret_cat': 'Retailer Category' if 'Retailer Category' in df_clean.columns else None,
+                'goo_l1': 'Google Category L1' if 'Google Category L1' in df_clean.columns else None,
+                'goo_l2': 'Google Category L2' if 'Google Category L2' in df_clean.columns else None,
+                'goo_l3': 'Google Category L3' if 'Google Category L3' in df_clean.columns else None,
+                'views': 'Views', 'clicks': 'Clicks', 'clips': 'Clips' if 'Clips' in df_clean.columns else None, 'ttms': 'TTMs'
             }
-
-            # Top items pivot
-            grp_top = [item_col]
-            if 'SKU' in df_prod.columns: grp_top.insert(0, 'SKU')
-            pivot_top = df_prod.groupby(grp_top).agg({
-                'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'TTMs': 'sum'
-            }).reset_index()
-            pivot_top.rename(columns={item_col: 'Name'}, inplace=True)
-            if 'SKU' not in pivot_top.columns: pivot_top['SKU'] = 'N/A'
-            pivot_top['Clips'] = 0
+            df_prod, df_creative, global_totals = process_metrics(df_clean, m)
+            merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(df_clean)
+            
+            pivot_top = df_prod.groupby('SKU').agg({'Name': 'first', 'Page': 'first', 'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
             pivot_top['Item CTR'] = np.where(pivot_top['Views'] > 0, pivot_top['Clicks'] / pivot_top['Views'], 0.0)
+            
+            col_l1, src_l1 = resolve_taxonomy_column_by_level(df_prod, level=1)
+            col_l2, src_l2 = resolve_taxonomy_column_by_level(df_prod, level=2)
+            col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
 
-            # Brand momentum
-            brand_agg = df_prod.groupby('Brand').agg(
-                Unique_Items=(item_col, 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), TTMs=('TTMs','sum')
-            ).reset_index()
-            brand_agg['Clips'] = 0
+            def build_cat_agg(cat_col, level):
+                if not cat_col or cat_col not in df_prod.columns: return pd.DataFrame()
+                df_temp = df_prod.copy()
+                df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
+                df_temp = df_temp[df_temp['Parsed_Cat'].notna()]
+                if df_temp.empty: return pd.DataFrame()
+
+                df_temp['Parsed_Cat'] = df_temp['Parsed_Cat'].apply(lambda x: normalize_text_bilingual(x, bilingual_category_map))
+
+                c_agg = df_temp.groupby('Parsed_Cat').agg(
+                    Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')
+                ).reset_index()
+                
+                c_agg.rename(columns={'Parsed_Cat': 'Category Name'}, inplace=True)
+                c_agg['Item Allocation'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
+                c_agg['Item Click'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
+                c_agg['Add to List'] = c_agg['Clips'] / c_agg['Clips'].sum() if c_agg['Clips'].sum() > 0 else 0
+                return c_agg
+
+            cat_l1_agg = build_cat_agg(col_l1, level=1)
+            cat_l2_agg = build_cat_agg(col_l2, level=2)
+            cat_l3_agg = build_cat_agg(col_l3, level=3)
+            
+            brand_agg = df_prod.groupby('Brand').agg(Unique_Items=('SKU', 'nunique'), Views=('Views','sum'), Clicks=('Clicks','sum'), Clips=('Clips','sum'), TTMs=('TTMs','sum')).reset_index()
             brand_agg['Click Share %'] = brand_agg['Clicks'] / global_totals['clicks'] if global_totals['clicks'] > 0 else 0
-            brand_agg['List Share %'] = 0
+            brand_agg['List Share %'] = brand_agg['Clips'] / global_totals['clips'] if global_totals['clips'] > 0 else 0
             brand_agg['TTM Share %'] = brand_agg['TTMs'] / global_totals['ttms'] if global_totals['ttms'] > 0 else 0
-
+            
             if not df_creative.empty:
-                df_creative.rename(columns={item_col: 'Name'}, inplace=True)
                 cr_agg = clean_and_group_creative_assets(df_creative)
+                
+            df_prod_bands = df_prod.copy()
+            df_prod_bands['Curr_Price'] = pd.to_numeric(df_prod_bands['Curr_Price'].astype(str).str.replace('$', '', regex=False).str.strip(), errors='coerce').fillna(0) if 'Curr_Price' in df_prod_bands.columns else 0.0
+            df_prod_bands['Discount_Pct'] = pd.to_numeric(df_prod_bands['Discount_Pct'].astype(str).str.replace('%', '', regex=False).str.strip(), errors='coerce').fillna(0) if 'Discount_Pct' in df_prod_bands.columns else 0.0
+
+            price_bins = [-1.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 1500.0, float('inf')]
+            price_labels = ["$0 - $10", "$11 - $25", "$26 - $50", "$51 - $100", "$101 - $250", "$251 - $500", "$501 - $1000", "$1001 - $1500", "$1500+"]
+            
+            discount_bins = [-1.0, 0.0, 15.0, 30.0, 50.0, float('inf')]
+            discount_labels = ["No Discount", "1% - 15%", "16% - 30%", "31% - 50%", "50%+"]
+
+            df_prod_bands['Price_Tier'] = pd.cut(df_prod_bands['Curr_Price'], bins=price_bins, labels=price_labels)
+            df_prod_bands['Discount_Tier'] = pd.cut(df_prod_bands['Discount_Pct'], bins=discount_bins, labels=discount_labels)
+            
+            p_agg = df_prod_bands.groupby('Price_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            p_agg['Click Share %'] = p_agg['Clicks'] / p_agg['Clicks'].sum() if p_agg['Clicks'].sum() > 0 else 0
+            p_agg['List Share %'] = p_agg['Clips'] / p_agg['Clips'].sum() if p_agg['Clips'].sum() > 0 else 0
+            p_agg['TTM Share %'] = p_agg['TTMs'] / p_agg['TTMs'].sum() if p_agg['TTMs'].sum() > 0 else 0
+            p_agg = p_agg[p_agg['Items'] > 0]
+
+            d_agg = df_prod_bands.groupby('Discount_Tier', observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+            d_agg['Click Share %'] = d_agg['Clicks'] / d_agg['Clicks'].sum() if d_agg['Clicks'].sum() > 0 else 0
+            d_agg['List Share %'] = d_agg['Clips'] / d_agg['Clips'].sum() if d_agg['Clips'].sum() > 0 else 0
+            d_agg['TTM Share %'] = d_agg['TTMs'] / d_agg['TTMs'].sum() if d_agg['TTMs'].sum() > 0 else 0
+            d_agg = d_agg[d_agg['Items'] > 0]
+
+            sale_story_cols = ['Sale Story', 'Sale_Story', 'Offer Type', 'Promo Type', 'Promotion Description', 'Offer_Type', 'Callout', 'Sale Story Callout']
+            col_sale_story = next((col for col in sale_story_cols if col in df_prod_bands.columns), None)
+
+            if col_sale_story:
+                df_ss_temp = df_prod_bands.copy()
+                df_ss_temp[col_sale_story] = df_ss_temp[col_sale_story].apply(normalize_sale_story)
+
+                s_agg = df_ss_temp.groupby(col_sale_story, observed=False).agg(Items=('SKU', 'nunique'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')).reset_index()
+                tot_ss_clicks = s_agg['Clicks'].sum()
+                tot_ss_clips = s_agg['Clips'].sum()
+                tot_ss_ttms = s_agg['TTMs'].sum()
+
+                s_agg['Click Share %'] = s_agg['Clicks'] / tot_ss_clicks if tot_ss_clicks > 0 else 0
+                s_agg['List Share %'] = s_agg['Clips'] / tot_ss_clips if tot_ss_clips > 0 else 0
+                s_agg['TTM Share %'] = s_agg['TTMs'] / tot_ss_ttms if tot_ss_ttms > 0 else 0
+                s_agg_sorted = s_agg.sort_values(by='Clicks', ascending=False).rename(columns={col_sale_story: 'Sale Story Callout'})
 
     if scroll_file:
         try:
             df_sc_raw, weekly_scroll, qbr_insights = process_scroll_file(scroll_file)
             df_sc_table = df_sc_raw.copy().rename(columns={'Milestone': 'Scroll Depth', 'Retention': '% of Users Read'})
         except Exception as e:
-            st.warning(f"Could not process the scroll file: {str(e)}")
+            st.warning(f"Could not process the scroll file. Error: {str(e)}")
 
-    # RENDER DASHBOARD METRICS
-    if merch_file and not df_clean.empty:
+    # Excel Download Generator
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        wrote_any = False
+        if not pivot_top.empty:
+            pivot_top.sort_values(by='Item CTR', ascending=False).head(50).to_excel(writer, sheet_name='Top Items', index=False)
+            if not cat_l1_agg.empty: cat_l1_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L1 Categories', index=False)
+            if not cat_l2_agg.empty: cat_l2_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L2 Categories', index=False)
+            if not cat_l3_agg.empty: cat_l3_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='L3 Categories', index=False)
+            brand_agg.sort_values(by='Clicks', ascending=False).to_excel(writer, sheet_name='Brand Momentum', index=False)
+            if not cr_agg.empty: cr_agg.to_excel(writer, sheet_name='Creative Assets', index=False)
+            p_agg.sort_values(by='Price_Tier').to_excel(writer, sheet_name='Price Bands', index=False)
+            d_agg.sort_values(by='Discount_Tier').to_excel(writer, sheet_name='Discount Bands', index=False)
+            if col_sale_story and not s_agg_sorted.empty: s_agg_sorted.to_excel(writer, sheet_name='Sale Story Performance', index=False)
+            wrote_any = True
+        if not df_sc_table.empty:
+            df_sc_table.to_excel(writer, sheet_name='Scroll Drop-off', index=False)
+            wrote_any = True
+        if weekly_scroll is not None and not weekly_scroll.empty:
+            weekly_scroll.to_excel(writer, sheet_name='Weekly Scroll Variance', index=False)
+            wrote_any = True
+            
+        if not wrote_any:
+            pd.DataFrame({'Message': ['No data processed.']}).to_excel(writer, sheet_name='Empty Data', index=False)
+
+    output.seek(0)
+    
+    dl_placeholder.download_button(
+        label="⬇️ Download Dashboard Report (.xlsx)",
+        data=output,
+        file_name="Campaign_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    if merch_files and not df_clean.empty:
         st.write("---")
+        st.subheader("📋 Campaign Context & Overview")
+        
+        info_c1, info_c2 = st.columns(2)
+        with info_c1:
+            st.markdown(f"* **Merchant:** `{merchant}`")
+            st.markdown(f"* **Flyer Run Name(s):** `{run_name}`")
+        with info_c2:
+            st.markdown(f"* **Flyer Run ID(s):** `{run_id}`")
+            st.markdown(f"* **Active Window:** `{date_from} to {date_to}`")
+        st.write("---")
+        
+        top_cat = cat_l1_agg.sort_values(by='Clicks', ascending=False).iloc[0]['Category Name'] if not cat_l1_agg.empty and 'Clicks' in cat_l1_agg.columns else "General Merchandise"
+        brand_clicks = df_prod.groupby('Brand')['Clicks'].sum() if not df_prod.empty else pd.Series(dtype=float)
+        top_brand = brand_clicks.idxmax() if not brand_clicks.empty else "UNKNOWN"
+        
+        render_insight_box(
+            f"The campaign generated **{global_totals['views']:,.0f} views** and **{global_totals['clicks']:,.0f} clicks**, achieving an overall item CTR of **{(global_totals['clicks']/global_totals['views']) if global_totals['views']>0 else 0:.2%}**.",
+            f"Audience engagement was heavily concentrated, with **{top_cat}** acting as the primary traffic driver for departments, and **{top_brand}** dominating brand-level affinity.",
+            f"**1.** Ensure future campaigns allocate sufficient premier page placement to {top_cat}.<br>**2.** Investigate the top 10 items by CTR and absolute Clicks to identify high-performing assets that can be repurposed in future creative."
+        )
+        
         v_tot, cl_tot, cp_tot, t_tot = global_totals['views'], global_totals['clicks'], global_totals['clips'], global_totals['ttms']
         ctr_global_display = f"{cl_tot/v_tot:.2%}" if v_tot > 0 else "0.00%"
         
         item_v_tot = df_prod['Views'].sum() if not df_prod.empty else 0
         item_cl_tot = df_prod['Clicks'].sum() if not df_prod.empty else 0
+        item_cp_tot = df_prod['Clips'].sum() if not df_prod.empty else 0
         item_t_tot = df_prod['TTMs'].sum() if not df_prod.empty else 0
         item_ctr_display = f"{item_cl_tot/item_v_tot:.2%}" if item_v_tot > 0 else "0.00%"
         
-        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🌐 Overall Campaign Totals (Includes Banners)</h4>", unsafe_allow_html=True)
+        st.markdown("<h4 style='color:#002551; margin-top:20px;'>🌐 Overall Campaign Totals (Includes Marketing Assets)</h4>", unsafe_allow_html=True)
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.markdown(f"<div class='metric-card'><div class='metric-val'>{v_tot:,.0f}</div><div class='metric-lbl'>TOTAL VIEWS</div></div>", unsafe_allow_html=True)
         c2.markdown(f"<div class='metric-card'><div class='metric-val'>{cl_tot:,.0f}</div><div class='metric-lbl'>TOTAL CLICKS</div></div>", unsafe_allow_html=True)
-        c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>ADD TO LISTS</div></div>", unsafe_allow_html=True)
+        c3.markdown(f"<div class='metric-card'><div class='metric-val'>{cp_tot:,.0f}</div><div class='metric-lbl'>TOTAL ADD TO LISTS</div></div>", unsafe_allow_html=True)
         c4.markdown(f"<div class='metric-card'><div class='metric-val'>{t_tot:,.0f}</div><div class='metric-lbl'>TOTAL TTMS</div></div>", unsafe_allow_html=True)
         c5.markdown(f"<div class='metric-card'><div class='metric-val'>{ctr_global_display}</div><div class='metric-lbl'>GLOBAL CTR</div></div>", unsafe_allow_html=True)
         
@@ -557,26 +386,262 @@ def render_single_campaign_matrix():
         i1, i2, i3, i4, i5 = st.columns(5)
         i1.markdown(f"<div class='metric-card'><div class='metric-val'>{item_v_tot:,.0f}</div><div class='metric-lbl'>TOTAL ITEM VIEWS</div></div>", unsafe_allow_html=True)
         i2.markdown(f"<div class='metric-card'><div class='metric-val'>{item_cl_tot:,.0f}</div><div class='metric-lbl'>ITEM CLICKS</div></div>", unsafe_allow_html=True)
-        i3.markdown(f"<div class='metric-card'><div class='metric-val'>0</div><div class='metric-lbl'>ITEM ADD TO LISTS</div></div>", unsafe_allow_html=True)
+        i3.markdown(f"<div class='metric-card'><div class='metric-val'>{item_cp_tot:,.0f}</div><div class='metric-lbl'>ITEM ADD TO LISTS</div></div>", unsafe_allow_html=True)
         i4.markdown(f"<div class='metric-card'><div class='metric-val'>{item_t_tot:,.0f}</div><div class='metric-lbl'>ITEM TTMS</div></div>", unsafe_allow_html=True)
         i5.markdown(f"<div class='metric-card'><div class='metric-val'>{item_ctr_display}</div><div class='metric-lbl'>ITEM CTR</div></div>", unsafe_allow_html=True)
         
         st.write("---")
         st.subheader("🏆 Top 10 Items by Total Clicks (Volume)")
-        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
 
         st.write("---")
         st.subheader("🎯 Top 10 Items by Item CTR (Efficiency)")
-        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        
+        st.write("---")
+        st.subheader("📊 Item Allocation vs Click Share")
+        tab_l1, tab_l2, tab_l3 = st.tabs(["L1 Primary Category", "L2 Subcategory", "L3 Sub-subcategory"])
+        
+        fmt_cat = {'Count': '{:,.0f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item Allocation': '{:.1%}', 'Item Click': '{:.1%}', 'Add to List': '{:.1%}'}
 
-        if not cr_agg.empty:
-            st.write("---")
-            st.subheader("🖼️ Consolidated Marketing Banners (Ranked by TTMR %)")
+        with tab_l1:
+            if not cat_l1_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l1}` ({src_l1})")
+                col_t1, col_c1 = st.columns(2)
+                l1_sorted = cat_l1_agg.sort_values(by='Item Click', ascending=False)
+                with col_t1: 
+                    st.dataframe(l1_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c1: 
+                    fig_l1 = px.bar(l1_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l1.add_scatter(x=l1_sorted['Category Name'], y=l1_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l1.update_layout(title=dict(text="Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l1, use_container_width=True)
+            else:
+                st.info("⚠️ No L1 taxonomy column containing data was detected in the file.")
+                
+        with tab_l2:
+            if not cat_l2_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l2}` ({src_l2})")
+                col_t2, col_c2 = st.columns(2)
+                l2_sorted = cat_l2_agg.sort_values(by='Item Click', ascending=False)
+                with col_t2: 
+                    st.dataframe(l2_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c2: 
+                    fig_l2 = px.bar(l2_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l2.add_scatter(x=l2_sorted['Category Name'], y=l2_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l2.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l2, use_container_width=True)
+            else:
+                st.info("⚠️ No L2 taxonomy column containing data was detected in the file.")
+                
+        with tab_l3:
+            if not cat_l3_agg.empty:
+                st.caption(f"📍 **Data Source:** `{col_l3}` ({src_l3})")
+                col_t3, col_c3 = st.columns(2)
+                l3_sorted = cat_l3_agg.sort_values(by='Item Click', ascending=False)
+                with col_t3: 
+                    st.dataframe(l3_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                with col_c3: 
+                    fig_l3 = px.bar(l3_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
+                    fig_l3.add_scatter(x=l3_sorted['Category Name'], y=l3_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
+                    fig_l3.update_layout(title=dict(text="Sub-Category Item Allocation vs. Click", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), yaxis=dict(title="% to Total", tickformat='.1%'), xaxis=dict(title=None), legend=dict(title=None))
+                    st.plotly_chart(fig_l3, use_container_width=True)
+            else:
+                st.info("⚠️ No L3 taxonomy column containing data was detected in the file.")
+
+        st.write("---")
+        st.subheader("🏷️ Brand Performance & Marketing Placements")
+        b_col, c_col = st.columns(2)
+        with b_col:
+            st.markdown("**Top Brand Momentum**")
+            st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
+                'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
+                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+            }), use_container_width=True, hide_index=True)
+        with c_col:
+            st.markdown("**Consolidated Marketing Banners (Ranked by TTMR %)**")
+            if not cr_agg.empty:
+                st.dataframe(
+                    cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']]
+                    .style.format({
+                        'Views': '{:,.0f}', 
+                        'Clicks': '{:,.0f}', 
+                        'TTMs': '{:,.0f}', 
+                        'Asset TTMR %': '{:.2%}',
+                        'Asset CTR %': '{:.2%}'
+                    }), 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+
+        st.write("---")
+        st.subheader("💰 Pricing, Promotional & Sale Story Analysis")
+        band_fmt = {'Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'}
+        
+        p_agg_sorted = p_agg.sort_values(by='Price_Tier')
+        d_agg_sorted = d_agg.sort_values(by='Discount_Tier')
+
+        c_p, c_d = st.columns(2)
+        with c_p: 
+            st.markdown("**Price Band Performance**")
+            st.dataframe(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+        with c_d: 
+            st.markdown("**Discount Band Performance**")
+            st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+            
+        if col_sale_story and not s_agg_sorted.empty:
+            st.write("")
+            st.markdown(f"**🏷️ Sale Story & Promotional Hook Performance** *(Mapped via `{col_sale_story}`)*")
             st.dataframe(
-                cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']]
-                .style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'TTMs': '{:,.0f}', 'Asset TTMR %': '{:.2%}', 'Asset CTR %': '{:.2%}'}),
-                use_container_width=True, hide_index=True
+                s_agg_sorted[['Sale Story Callout', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt),
+                use_container_width=True,
+                hide_index=True
             )
+
+        st.write("")
+        col_pb1, col_pb2 = st.columns(2)
+        
+        with col_pb1:
+            df_melt_1 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['Click Share %', 'List Share %'])
+            df_melt_1['variable'] = df_melt_1['variable'].replace({'Click Share %': 'Clicks to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_1 = px.bar(
+                df_melt_1, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_1.update_layout(
+                title=dict(text="Price Band: Clicks vs. Clips Share", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_1, use_container_width=True)
+
+        with col_pb2:
+            df_melt_2 = p_agg_sorted.melt(id_vars='Price_Tier', value_vars=['TTM Share %', 'List Share %'])
+            df_melt_2['variable'] = df_melt_2['variable'].replace({'TTM Share %': 'TTMs to Total', 'List Share %': 'Clips to Total'})
+            
+            fig_price_2 = px.bar(
+                df_melt_2, x='Price_Tier', y='value', color='variable', barmode='group',
+                color_discrete_sequence=['#e97132', '#156082']
+            )
+            fig_price_2.update_layout(
+                title=dict(text="Price Band: TTMs vs. Clips Share", x=0.5, xanchor='center', xref='paper', font=dict(family='Arial', size=16)), 
+                yaxis=dict(title="% of Total", tickformat='.1%'), 
+                xaxis=dict(title=None), 
+                legend=dict(title=None)
+            )
+            st.plotly_chart(fig_price_2, use_container_width=True)
+
+        st.info("""
+        💡 **How to Read the Share Graphs:** These charts display the **Proportional Share of Total**, not raw volume. 
+        
+        * **Balanced Bars (Equal Height):** If the orange (Clicks) and blue (Clips) bars are roughly the same height, shopper behavior is highly predictable and stable. The price band is converting traffic into list-adds at a perfectly proportionate rate.
+        * **Orange Higher than Blue (Clickbait):** The price tier generates high curiosity and traffic, but shoppers ultimately refuse to save the items (often due to price shock).
+        * **Blue Higher than Orange (High Efficiency):** This price tier is highly efficient. Even if it doesn't drive the majority of your traffic, the shoppers who *do* click are highly motivated to save or buy the products.
+        """)
+        
+        if not p_agg_sorted.empty and global_totals['views'] > 0:
+            top_list_tier = p_agg_sorted.loc[p_agg_sorted['Clips'].idxmax(), 'Price_Tier'] if p_agg_sorted['Clips'].sum() > 0 else None
+            top_ttm_tier = p_agg_sorted.loc[p_agg_sorted['TTMs'].idxmax(), 'Price_Tier'] if p_agg_sorted['TTMs'].sum() > 0 else None
+            
+            if top_list_tier or top_ttm_tier:
+                st.markdown("#### 🛍️ Hero Products in Winning Price Bands")
+                col_tl, col_tt = st.columns(2)
+                
+                with col_tl:
+                    if top_list_tier:
+                        st.success(f"📋 **Top Add-to-List Tier: {top_list_tier}**")
+                        top_list_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_list_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
+                        st.dataframe(top_list_items[['SKU', 'Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        
+                with col_tt:
+                    if top_ttm_tier:
+                        st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier}**")
+                        top_ttm_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_ttm_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
+                        st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
+
+    if scroll_file and not df_sc_table.empty:
+        st.write("---")
+        st.subheader("📉 Audience Scroll Retention & Drop-off")
+        
+        if qbr_insights:
+            st.success(f"🌟 **Insight:** The engine detected multiple campaigns/weeks. Here is how your audience engaged across the flights:")
+            
+            st.markdown(f"""
+            **1. Total Content Consumed (Highest Volume)**
+            * **Winner:** **{qbr_insights['vol_week']}**
+            * **Why it won:** This flyer drove the highest absolute volume of page reads. Even if users dropped off over time, its structure generated the most total brand engagement.
+
+            **2. Engagement Efficiency (Lowest Drop-off Velocity)**
+            * **Winner:** **{qbr_insights['eff_week']}**
+            * **Why it won:** This flyer was the most "gripping". It held onto its starting audience the best step-by-step, losing an average of only **{qbr_insights['eff_drop']:.1%}** of readers per scroll.
+
+            **3. The 'Half-Life' Metric (Median Reader Depth)**
+            * **Insight:** For your highest volume flyer ({qbr_insights['vol_week']}), you successfully kept the majority of your audience up until the **{qbr_insights['hl_milestone']}** mark.
+            * **Why it matters:** Any products or categories placed after this 50% drop-off threshold were essentially invisible to the majority of your weekly traffic.
+            """)
+            
+        sc_col1, sc_col2 = st.columns([1, 2])
+        with sc_col1:
+            st.markdown("**Global Average Retention**")
+            st.dataframe(df_sc_table[['Scroll Depth', '% of Users Read', 'Approx Page']].style.format({'% of Users Read': '{:.1%}'}), use_container_width=True, hide_index=True)
+        with sc_col2:
+            if weekly_scroll is not None and not weekly_scroll.empty:
+                fig = px.line(weekly_scroll, x='Milestone', y='Retention', color='Campaign/Week', markers=True, title="Variance by Campaign/Week")
+            else:
+                fig = px.line(df_sc_table, x='Scroll Depth', y='% of Users Read', markers=True, color_discrete_sequence=['#0054B7'])
+            
+            ordered_milestones = df_sc_table['Scroll Depth'].tolist()
+            fig.update_layout(
+                xaxis=dict(categoryorder='array', categoryarray=ordered_milestones),
+                yaxis=dict(tickformat='.0%', range=[0,1])
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        if not df_sc_table.empty:
+            cliff_data = df_sc_table[df_sc_table['% of Users Read'] < 0.50]
+            
+            if not cliff_data.empty:
+                cliff_depth = cliff_data.iloc[0]['Scroll Depth']
+                cliff_ret = cliff_data.iloc[0]['% of Users Read']
+                cliff_pg = cliff_data.iloc[0]['Approx Page']
+                cliff_pg_int = max(1, int(cliff_pg))
+                
+                cliff_text = f"**The 'Half-Life' Cliff:** Audience retention drops below 50% at the **{cliff_depth}** mark (approx. Page {cliff_pg:.1f}), falling to **{cliff_ret:.1%}**. Your highest-margin items must be placed *before* this point to guarantee visibility."
+                
+                page_prod_clicks = df_prod[df_prod['Page'] == cliff_pg_int]['Clicks'].sum() if not df_prod.empty else 0
+                try:
+                    page_creative_clicks = df_creative[df_creative['Page'] == cliff_pg_int]['Clicks'].sum() if not df_creative.empty else 0
+                except NameError:
+                    page_creative_clicks = 0
+                    
+                total_campaign_clicks = df_prod['Clicks'].sum() + page_creative_clicks
+                
+                diagnostic_text = ""
+                if total_campaign_clicks > 0:
+                    creative_share = page_creative_clicks / total_campaign_clicks
+                    prod_share = page_prod_clicks / total_campaign_clicks
+                    
+                    if creative_share > 0.10:
+                        diagnostic_text = f"**Why the Drop? (The Leaky Bucket):** We tracked a massive volume of clicks ({page_creative_clicks:,.0f}) on Marketing Assets/Banners on Page {cliff_pg_int}. Shoppers likely clicked these navigational links and exited the flyer to browse your main site."
+                    elif prod_share > 0.15:
+                        diagnostic_text = f"**Why the Drop? (The Shopping Spree):** Items on Page {cliff_pg_int} captured **{prod_share:.1%}** of your total campaign clicks. Shoppers likely found exactly what they wanted early on and clicked out to purchase."
+                    else:
+                        diagnostic_text = f"**Why the Drop? (Content Friction):** Click engagement on Page {cliff_pg_int} was relatively low compared to the severe drop-off. This suggests the product mix, price points, or layout on this specific page failed to hold attention, causing a pure bounce."
+            else:
+                cliff_text = "**The 'Half-Life' Cliff:** Incredible retention! Your audience stays above 50% engagement throughout the entire flyer, giving you massive visibility across every single page."
+                diagnostic_text = ""
+
+            final_ret = df_sc_table.iloc[-1]['% of Users Read']
+            
+            st.info(f"""
+            💡 **Dynamic Scroll Insights:** 
+            
+            * {cliff_text}
+            {f'* {diagnostic_text}' if diagnostic_text else ''}
+            * **The Loyalists:** You successfully carried **{final_ret:.1%}** of your audience to the very end of the campaign. The back pages remain an excellent location for niche, high-research, or long-tail product categories.
+            """)
 # ==============================================================================
 # 🗂️ MODULE 2: HEAD-TO-HEAD COMPARISON (PERSISTENT & FAST)
 # ==============================================================================

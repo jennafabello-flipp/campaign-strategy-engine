@@ -1785,12 +1785,37 @@ def render_dvm_module_performance():
                 df_merch['Clean_SKU'] = 'UNKNOWN'
 
     # --------------------------------------------------------------------------
-    # 📌 FLIGHT INFORMATION RECAP BANNER
+    # 📌 FLIGHT INFORMATION RECAP BANNER (PULLED FROM MODULE FILE FIRST)
     # --------------------------------------------------------------------------
     st.write("---")
     
-    target_df = df_merch if not df_merch.empty else df_mod
-    merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(target_df)
+    def extract_module_header_metadata(df_m, df_fallback):
+        # Prefer df_mod if populated
+        target_df = df_m if not df_m.empty else df_fallback
+        
+        merchant = target_df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in target_df.columns and len(target_df['Merchant Name'].dropna()) > 0 else "Home Depot Canada"
+        
+        run_name_col = next((c for c in target_df.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower() or 'description' in str(c).lower()), None)
+        run_name = ", ".join(target_df[run_name_col].dropna().astype(str).str.strip().unique()) if run_name_col else "DVM Hosted Campaign"
+        
+        run_id_col = next((c for c in target_df.columns if 'flyer run id' in str(c).lower() or 'run id' in str(c).lower()), None)
+        if run_id_col:
+            unique_ids = target_df[run_id_col].dropna().unique()
+            run_id = ", ".join([str(int(x)) if isinstance(x, (int, float)) and not pd.isna(x) else str(x) for x in unique_ids])
+        else:
+            run_id = "N/A"
+            
+        date_col = next((c for c in target_df.columns if 'date' in str(c).lower() or 'available' in str(c).lower()), None)
+        if date_col:
+            parsed_dates = pd.to_datetime(target_df[date_col], errors='coerce').dropna()
+            date_from = parsed_dates.min().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
+            date_to = parsed_dates.max().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
+        else:
+            date_from, date_to = "N/A", "N/A"
+            
+        return merchant, run_name, run_id, date_from, date_to
+
+    merchant, run_name, run_id, date_from, date_to = extract_module_header_metadata(df_mod, df_merch)
     
     info_c1, info_c2 = st.columns(2)
     with info_c1:

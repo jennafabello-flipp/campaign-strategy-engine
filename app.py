@@ -1785,28 +1785,35 @@ def render_dvm_module_performance():
                 df_merch['Clean_SKU'] = 'UNKNOWN'
 
     # --------------------------------------------------------------------------
-    # 📌 FLIGHT INFORMATION RECAP BANNER (PULLED FROM MODULE FILE FIRST)
+    # 📌 FLIGHT INFORMATION RECAP BANNER (MODULE TYPE & FLYER RUN IDS FROM MODULE DATA)
     # --------------------------------------------------------------------------
     st.write("---")
     
-    def extract_module_header_metadata(df_m, df_fallback):
-        # Prefer df_mod if populated
-        target_df = df_m if not df_m.empty else df_fallback
+    def extract_module_header_metadata(df_m, df_m_raw):
+        target_df = df_m if not df_m.empty else df_m_raw
         
+        # 1. Merchant Name
         merchant = target_df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in target_df.columns and len(target_df['Merchant Name'].dropna()) > 0 else "Home Depot Canada"
         
-        run_name_col = next((c for c in target_df.columns if 'flyer run name' in str(c).lower() or 'campaign name' in str(c).lower() or 'description' in str(c).lower()), None)
-        run_name = ", ".join(target_df[run_name_col].dropna().astype(str).str.strip().unique()) if run_name_col else "DVM Hosted Campaign"
-        
-        run_id_col = next((c for c in target_df.columns if 'flyer run id' in str(c).lower() or 'run id' in str(c).lower()), None)
-        if run_id_col:
-            unique_ids = target_df[run_id_col].dropna().unique()
-            run_id = ", ".join([str(int(x)) if isinstance(x, (int, float)) and not pd.isna(x) else str(x) for x in unique_ids])
+        # 2. Flyer Run Name(s) -> Pulled directly from Module Type in Module reporting
+        type_col = next((c for c in target_df.columns if 'module type' in str(c).lower() or str(c).lower().strip() == 'type'), None)
+        if type_col and type_col in target_df.columns:
+            types_list = [str(x).strip() for x in target_df[type_col].dropna().unique() if str(x).strip() != '']
+            run_name = ", ".join(types_list) if len(types_list) > 0 else "DVM Hosted Module"
+        else:
+            run_name = "DVM Hosted Module"
+            
+        # 3. Flyer Run ID(s) -> Specified from Flyer Run Id in Module reporting
+        id_col = next((c for c in target_df.columns if 'flyer run id' in str(c).lower() or 'run id' in str(c).lower()), None)
+        if id_col and id_col in target_df.columns:
+            unique_ids = target_df[id_col].dropna().astype(str).str.replace('.0', '', regex=False).str.strip().unique()
+            run_id = ", ".join([x for x in unique_ids if x.lower() not in ['nan', 'none', 'null', '']])
         else:
             run_id = "N/A"
             
+        # 4. Active Window Dates
         date_col = next((c for c in target_df.columns if 'date' in str(c).lower() or 'available' in str(c).lower()), None)
-        if date_col:
+        if date_col and date_col in target_df.columns:
             parsed_dates = pd.to_datetime(target_df[date_col], errors='coerce').dropna()
             date_from = parsed_dates.min().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
             date_to = parsed_dates.max().strftime('%Y-%m-%d') if len(parsed_dates) > 0 else "N/A"
@@ -1820,7 +1827,7 @@ def render_dvm_module_performance():
     info_c1, info_c2 = st.columns(2)
     with info_c1:
         st.markdown(f"* **Merchant:** `{merchant}`")
-        st.markdown(f"* **Flyer Run Name(s):** `{run_name}`")
+        st.markdown(f"* **Flyer Run Name(s) (Module Type):** `{run_name}`")
     with info_c2:
         st.markdown(f"* **Flyer Run ID(s):** `{run_id}`")
         st.markdown(f"* **Active Window:** `{date_from} to {date_to}`")

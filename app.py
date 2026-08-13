@@ -37,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🧹 ARMORED AUTO-SCRUBBER ENGINE
+# 🧹 ARMORED AUTO-SCRUBBER ENGINE (MULTIPLE KEYWORD CONSENSUS)
 # ==============================================================================
 def clean_bilingual_suffix(name_str):
     if pd.isna(name_str): return "Unnamed Asset"
@@ -56,14 +56,19 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
             
         df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
             
-        header_idx = 0
-        for i in range(min(30, len(df_raw))):
-            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values]
-            if 'merchandise name' in row_vals or 'total item views' in row_vals or 'sku' in row_vals or 'item views' in row_vals:
-                header_idx = i
-                break
+        # Consensus header finder: picks row with max matching header keywords
+        keywords = {'sku', 'brand', 'device', 'state or province', 'province', 'module type', 'module item position', 'total item clicks', 'item views', 'merchandise name', 'weekly date'}
+        best_row = 0
+        max_matches = 0
+        
+        for i in range(min(35, len(df_raw))):
+            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values if pd.notna(x)]
+            matches = sum(1 for val in row_vals if any(k == val or k in val for k in keywords))
+            if matches > max_matches:
+                max_matches = matches
+                best_row = i
                 
-        df_clean = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
+        df_clean = pd.read_csv(io.BytesIO(file_bytes), skiprows=best_row, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=best_row)
         df_clean.columns = [str(c).strip() for c in df_clean.columns]
 
         def get_col(exact_names):
@@ -78,11 +83,11 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
         mapping = {
             'sku': get_col(['Sku', 'SKU', 'Merchandise ID']), 
             'name': get_col(['Merchandise Name', 'Name']),
-            'date': get_col(['Daily Available From', 'Date', 'Start Date']),
-            'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
+            'date': get_col(['Daily Available From', 'Date', 'Start Date', 'Weekly Date']),
+            'run_id': get_col(['Flyer Run ID', 'Flyer Run Id', 'Run ID', 'Campaign ID']),
             'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
-            'display_type': get_col(['Display Type']), 
-            'page': get_col(['Page Position', 'Page']),
+            'display_type': get_col(['Display Type', 'Channel']), 
+            'page': get_col(['Page Position', 'Page', 'Module Item Position']),
             'brand': get_col(['Brand', 'Manufacturer']), 
             'orig_price': get_col(['Total Original Price', 'Original Price']),
             'curr_price': get_col(['Total Current Price', 'Current Price']), 
@@ -91,15 +96,15 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
             'c2': get_col(['Custom ID 2']), 
             'c3': get_col(['Custom ID 3']),
             'ret_cat': get_col(['Retailer Category']), 
-            'goo_l1': get_col(['Google Category L1', 'Google Cat']), 
+            'goo_l1': get_col(['Google Category L1', 'Google Cat', 'Google Category Name']), 
             'goo_l2': get_col(['Google Category L2']), 
             'goo_l3': get_col(['Google Category L3']),
             'views': get_col(['Total Item Views', 'Item Views', 'Views']), 
             'clicks': get_col(['Total Item Clicks', 'Item Clicks', 'Clicks']),
             'clips': get_col(['Total Clippings', 'Clips']), 
-            'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTM', 'TTMS'])
+            'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTM', 'TTMS', 'Item Details Click'])
         }
-        return df_clean, mapping, header_idx
+        return df_clean, mapping, best_row
     except Exception as e:
         st.error(f"Error scrubbing file setup: {str(e)}")
         return None, None, None
@@ -1719,77 +1724,6 @@ def render_taylors_workspace():
             st.divider()
 
 # ==============================================================================
-# 🧹 ARMORED AUTO-SCRUBBER ENGINE (Updated Header Detector)
-# ==============================================================================
-def clean_bilingual_suffix(name_str):
-    if pd.isna(name_str): return "Unnamed Asset"
-    return re.sub(r'(?i)[-_ ]+(FR|EN)\b', '', str(name_str)).strip()
-
-def scrub_and_load_excel(file_obj, is_local_path=False):
-    if file_obj is None: return None, None, None
-    try:
-        if is_local_path:
-            is_csv = file_obj.lower().endswith('.csv')
-            with open(file_obj, 'rb') as f:
-                file_bytes = f.read()
-        else:
-            file_bytes = file_obj.read()
-            is_csv = file_obj.name.lower().endswith('.csv')
-            
-        df_raw = pd.read_csv(io.BytesIO(file_bytes), header=None, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), header=None)
-            
-        header_idx = 0
-        header_keywords = ['merchandise name', 'total item views', 'sku', 'item views', 'flyer run id', 'state or province', 'weekly date', 'channel', 'device']
-        
-        for i in range(min(30, len(df_raw))):
-            row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values if pd.notna(x)]
-            if any(k in row_vals for k in header_keywords) or any(any(k in v for k in header_keywords) for v in row_vals):
-                header_idx = i
-                break
-                
-        df_clean = pd.read_csv(io.BytesIO(file_bytes), skiprows=header_idx, low_memory=False) if is_csv else pd.read_excel(io.BytesIO(file_bytes), skiprows=header_idx)
-        df_clean.columns = [str(c).strip() for c in df_clean.columns]
-
-        def get_col(exact_names):
-            for exact in exact_names:
-                for col in df_clean.columns:
-                    if exact.lower() == col.lower(): return col
-            for exact in exact_names:
-                for col in df_clean.columns:
-                    if exact.lower() in col.lower(): return col
-            return None
-
-        mapping = {
-            'sku': get_col(['Sku', 'SKU', 'Merchandise ID']), 
-            'name': get_col(['Merchandise Name', 'Name']),
-            'date': get_col(['Daily Available From', 'Date', 'Start Date', 'Weekly Date']),
-            'run_id': get_col(['Flyer Run ID', 'Flyer Run Id', 'Run ID', 'Campaign ID']),
-            'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
-            'display_type': get_col(['Display Type', 'Channel']), 
-            'page': get_col(['Page Position', 'Page', 'Module Item Position']),
-            'brand': get_col(['Brand', 'Manufacturer']), 
-            'orig_price': get_col(['Total Original Price', 'Original Price']),
-            'curr_price': get_col(['Total Current Price', 'Current Price']), 
-            'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
-            'c1': get_col(['Custom ID 1']), 
-            'c2': get_col(['Custom ID 2']), 
-            'c3': get_col(['Custom ID 3']),
-            'ret_cat': get_col(['Retailer Category']), 
-            'goo_l1': get_col(['Google Category L1', 'Google Cat', 'Google Category Name']), 
-            'goo_l2': get_col(['Google Category L2']), 
-            'goo_l3': get_col(['Google Category L3']),
-            'views': get_col(['Total Item Views', 'Item Views', 'Views']), 
-            'clicks': get_col(['Total Item Clicks', 'Item Clicks', 'Clicks']),
-            'clips': get_col(['Total Clippings', 'Clips']), 
-            'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTM', 'TTMS', 'Item Details Click'])
-        }
-        return df_clean, mapping, header_idx
-    except Exception as e:
-        st.error(f"Error scrubbing file setup: {str(e)}")
-        return None, None, None
-
-
-# ==============================================================================
 # 📱 MODULE 5: DVM MODULE PERFORMANCE
 # ==============================================================================
 def render_dvm_module_performance():
@@ -2030,6 +1964,7 @@ def render_dvm_module_performance():
                         st.plotly_chart(fig_brand, use_container_width=True)
 
                 st.divider()
+
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU
 # ---------------------------------------------------------

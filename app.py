@@ -129,13 +129,13 @@ def parse_and_combine_multiple_files(uploaded_files):
     return pd.DataFrame(), None
 
 def process_metrics(df, m):
-    df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] else "Unnamed Asset"
-    df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] else "PRODUCT"
-    df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] else 1
+    df['Name'] = df[m['name']].astype(str).str.strip().apply(clean_bilingual_suffix) if m['name'] and m['name'] in df.columns else "Unnamed Asset"
+    df['Display_Type'] = df[m['display_type']].astype(str).str.upper().str.strip() if m['display_type'] and m['display_type'] in df.columns else "PRODUCT"
+    df['Page'] = df[m['page']].astype(str).str.extract(r'(\d+)').fillna(1).astype(int) if m['page'] and m['page'] in df.columns else 1
     df['Brand'] = df[m['brand']].astype(str).str.strip() if m['brand'] and m['brand'] in df.columns else "UNKNOWN"
-    df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') else pd.NaT
-    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') else "UNKNOWN"
-    df['Flyer_Description'] = df[m['run_name']].astype(str) if m.get('run_name') else df['Run_ID']
+    df['Date'] = pd.to_datetime(df[m['date']], errors='coerce') if m.get('date') and m['date'] in df.columns else pd.NaT
+    df['Run_ID'] = df[m['run_id']].astype(str) if m.get('run_id') and m['run_id'] in df.columns else "UNKNOWN"
+    df['Flyer_Description'] = df[m['run_name']].astype(str) if m.get('run_name') and m['run_name'] in df.columns else df['Run_ID']
     
     def safe_numeric(col_name):
         if m[col_name] and m[col_name] in df.columns:
@@ -148,17 +148,19 @@ def process_metrics(df, m):
     df['Discount_Pct'] = np.where(df['Orig_Price'] > 0, ((df['Orig_Price'] - df['Curr_Price']) / df['Orig_Price']) * 100, 0.0)
     df['Discount_Pct'] = np.where(df['Discount_Pct'] < 0, 0.0, df['Discount_Pct'])
 
-    is_sku_clone = df['Brand'].isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
+    brand_str = df['Brand'].astype(str)
+    is_sku_clone = brand_str.isin(['nan', 'NaN', 'None', '', 'UNKNOWN'])
     if m['sku'] and m['sku'] in df.columns:
-        is_sku_clone = is_sku_clone | (df['Brand'] == df[m['sku']])
+        sku_str = df[m['sku']].astype(str)
+        is_sku_clone = is_sku_clone | (brand_str == sku_str)
         
     df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
 
     def normalize_sku(row):
-        s = str(row[m['sku']]).strip() if m['sku'] else "UNKNOWN"
+        s = str(row[m['sku']]).strip() if m['sku'] and m['sku'] in row.index else "UNKNOWN"
         if s.endswith('.0'): s = s[:-2]
         if s.lower() not in ['nan', 'none', '', 'null', '0', 'unknown']: return s
-        if m.get('url') and pd.notna(row[m['url']]):
+        if m.get('url') and m['url'] in row.index and pd.notna(row[m['url']]):
             url = str(row[m['url']])
             match = re.search(r'(?:variantCode|sku|id|pid)=([A-Za-z0-9_-]+)', url, re.IGNORECASE)
             if match: return f"URL_{match.group(1).upper()}"
@@ -177,21 +179,21 @@ def process_metrics(df, m):
 
     def get_l1(row):
         for key in ['c1', 'ret_cat', 'goo_l1']:
-            if m[key] and pd.notna(row[m[key]]):
+            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
                 val = str(row[m[key]]).strip()
                 if val not in ["", "NULL", "nan", "NaN", "None"]: return val
         return "General Merchandise"
 
     def get_l2(row):
         for key in ['c2', 'goo_l2']:
-            if m[key] and pd.notna(row[m[key]]):
+            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
                 val = str(row[m[key]]).strip()
                 if val not in ["", "NULL", "nan", "NaN", "None"]: return val
         return "Uncategorized Sub-Department"
         
     def get_l3(row):
         for key in ['c3', 'goo_l3']:
-            if m[key] and pd.notna(row[m[key]]):
+            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
                 val = str(row[m[key]]).strip()
                 if val not in ["", "NULL", "nan", "NaN", "None"]: return val
         return "Uncategorized Item-Level"
@@ -202,7 +204,7 @@ def process_metrics(df, m):
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
-    is_creative = df['Display_Type'].isin(['BANNER', 'LINK']) | df['Name'].str.contains('BANNER', case=False, na=False)
+    is_creative = df['Display_Type'].astype(str).isin(['BANNER', 'LINK']) | df['Name'].astype(str).str.contains('BANNER', case=False, na=False)
     
     df_prod = df[~is_creative].copy()
     df_creative = df[is_creative].copy()
@@ -1739,7 +1741,6 @@ def render_dvm_module_performance():
     if module_file:
         df_mod, m_mod, _ = scrub_and_load_excel(module_file)
         if df_mod is not None:
-            # Map specific Module reporting columns
             col_sku_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['sku', 'item sku', 'product sku']), 'Sku')
             col_prov_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['state or province', 'province', 'state', 'region']), 'State Or Province')
             col_dev_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['device', 'platform']), 'Device')
@@ -1749,14 +1750,12 @@ def render_dvm_module_performance():
             col_views_mod = next((c for c in df_mod.columns if 'item views' in str(c).lower() or 'total item views' in str(c).lower() or str(c).lower().strip() == 'views'), 'Item Views')
             col_ttm_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['ttm', 'ttms', 'total transfer to merchant (ttms)', 'item ttms']), 'TTM')
 
-            # Ensure numeric safety
             for c in [col_clicks_mod, col_views_mod, col_ttm_mod]:
                 if c in df_mod.columns:
                     df_mod[c] = pd.to_numeric(df_mod[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
                 else:
                     df_mod[c] = 0
 
-            # SKU padding
             if col_sku_mod in df_mod.columns:
                 df_mod['Clean_SKU'] = df_mod[col_sku_mod].astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
             else:
@@ -1765,6 +1764,13 @@ def render_dvm_module_performance():
     if merch_file:
         df_merch_raw, m_merch, _ = scrub_and_load_excel(merch_file)
         if df_merch_raw is not None:
+            # Filter strictly to Channel = 'Hosted' if Channel column exists
+            chan_col = next((c for c in df_merch_raw.columns if str(c).lower().strip() in ['channel', 'display type', 'display_type']), None)
+            if chan_col:
+                is_hosted = df_merch_raw[chan_col].astype(str).str.contains('hosted', case=False, na=False)
+                if is_hosted.any():
+                    df_merch_raw = df_merch_raw[is_hosted].copy()
+
             df_merch, _, _ = process_metrics(df_merch_raw, m_merch)
             if 'SKU' in df_merch.columns:
                 df_merch['Clean_SKU'] = df_merch['SKU'].astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
@@ -1773,9 +1779,7 @@ def render_dvm_module_performance():
 
     st.write("---")
 
-    # --------------------------------------------------------------------------
-    # 🗺️ 1. CLICK PERCENTAGE BY PROVINCE / STATE (HEATMAP - MODULE DATA ONLY)
-    # --------------------------------------------------------------------------
+    # 1. CLICK PERCENTAGE BY PROVINCE / STATE (HEATMAP)
     if not df_mod.empty and col_prov_mod in df_mod.columns:
         st.subheader("🗺️ Regional Click Share Heatmap (Province / State)")
         
@@ -1807,9 +1811,7 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # --------------------------------------------------------------------------
-    # 📈 2. CLICK PERCENTAGE BY DAY (MODULE + HOSTED MERCH DATA COMBINED)
-    # --------------------------------------------------------------------------
+    # 2. CLICK PERCENTAGE BY DAY (MODULE + HOSTED MERCH DATA COMBINED)
     st.subheader("📈 Daily Click Velocity (Module & Hosted Merch Data Combined)")
     
     date_series_list = []
@@ -1853,9 +1855,7 @@ def render_dvm_module_performance():
 
     st.write("---")
 
-    # --------------------------------------------------------------------------
-    # 📊 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
-    # --------------------------------------------------------------------------
+    # 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
     if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
         st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
         
@@ -1871,9 +1871,7 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # --------------------------------------------------------------------------
-    # 🔄 MODULE TYPE LOOP (ITEMS 4 & 5 SPLIT BY MODULE TYPE)
-    # --------------------------------------------------------------------------
+    # MULTI-MODULE PROCESSING RULE (ITEMS 4 & 5 REPEATED PER MODULE TYPE)
     if not df_mod.empty and col_type_mod in df_mod.columns:
         unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
         
@@ -1885,12 +1883,11 @@ def render_dvm_module_performance():
                 st.markdown(f"### 📦 Module Format: `{m_type}`")
                 df_type_sub = df_mod[df_mod[col_type_mod] == m_type].copy()
 
-                # Merge Hosted Merch Data if SKU matched
                 if not df_merch.empty and 'Clean_SKU' in df_type_sub.columns and 'Clean_SKU' in df_merch.columns:
                     df_combined_sku = pd.merge(
                         df_type_sub, 
                         df_merch[['Clean_SKU', 'Name', 'TTMs']].drop_duplicates(subset=['Clean_SKU']),
-                        on='Clean_SKU', how='left', suffixes=('', '_merch')
+                        on='Clean_SKU', how='outer', suffixes=('', '_merch')
                     )
                 else:
                     df_combined_sku = df_type_sub.copy()

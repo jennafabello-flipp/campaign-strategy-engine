@@ -1730,6 +1730,8 @@ def render_dvm_module_performance():
     st.markdown("<div class='main-header'>📱 Module 5: DVM Module Performance</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload Hosted Module Reporting and Hosted Merchandise Metrics to analyze provincial engagement, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
 
+    dl_placeholder = st.empty()
+
     col1, col2 = st.columns(2)
     with col1:
         module_file = st.file_uploader("1️⃣ Upload Hosted Module Reporting (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_module")
@@ -1742,6 +1744,7 @@ def render_dvm_module_performance():
 
     df_mod = pd.DataFrame()
     df_merch = pd.DataFrame()
+    export_sheets = {}
 
     if module_file:
         df_mod, m_mod, _ = scrub_and_load_excel(module_file)
@@ -1781,6 +1784,22 @@ def render_dvm_module_performance():
             else:
                 df_merch['Clean_SKU'] = 'UNKNOWN'
 
+    # --------------------------------------------------------------------------
+    # 📌 FLIGHT INFORMATION RECAP BANNER
+    # --------------------------------------------------------------------------
+    st.write("---")
+    
+    target_df = df_merch if not df_merch.empty else df_mod
+    merchant, run_name, run_id, date_from, date_to = extract_campaign_header_metadata(target_df)
+    
+    info_c1, info_c2 = st.columns(2)
+    with info_c1:
+        st.markdown(f"* **Merchant:** `{merchant}`")
+        st.markdown(f"* **Flyer Run Name(s):** `{run_name}`")
+    with info_c2:
+        st.markdown(f"* **Flyer Run ID(s):** `{run_id}`")
+        st.markdown(f"* **Active Window:** `{date_from} to {date_to}`")
+        
     st.write("---")
 
     # --------------------------------------------------------------------------
@@ -1808,14 +1827,14 @@ def render_dvm_module_performance():
         ca_matches = sum(1 for loc in raw_locs if loc in prov_name_map_ca)
         is_canada_data = (ca_matches / len(raw_locs) > 0.3) if len(raw_locs) > 0 else False
 
+        prov_export = prov_agg[['Region_Code', col_clicks_mod, 'Click Share %']].sort_values(by='Click Share %', ascending=False).rename(columns={'Region_Code': 'Region', col_clicks_mod: 'Item Clicks'})
+        export_sheets["Regional_Clicks"] = prov_export
+
         c_map1, c_map2 = st.columns([1, 2])
         with c_map1:
             st.markdown(f"**{'Provincial' if is_canada_data else 'State'} Breakdown**")
             st.dataframe(
-                prov_agg[['Region_Code', col_clicks_mod, 'Click Share %']]
-                .sort_values(by='Click Share %', ascending=False)
-                .rename(columns={'Region_Code': 'Region', col_clicks_mod: 'Item Clicks'})
-                .style.format({'Item Clicks': '{:,.0f}', 'Click Share %': '{:.2%}'}),
+                prov_export.style.format({'Item Clicks': '{:,.0f}', 'Click Share %': '{:.2%}'}),
                 use_container_width=True, hide_index=True
             )
 
@@ -1865,7 +1884,9 @@ def render_dvm_module_performance():
         st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
         
         pos_agg = df_mod.groupby([col_pos_mod, col_dev_mod])[col_clicks_mod].sum().reset_index()
-        
+        pos_pivot = pos_agg.pivot(index=col_pos_mod, columns=col_dev_mod, values=col_clicks_mod).fillna(0).reset_index()
+        export_sheets["Position_by_Device"] = pos_pivot
+
         fig_pos = px.bar(
             pos_agg, x=col_pos_mod, y=col_clicks_mod, color=col_dev_mod,
             barmode='group', title="Module Item Position Clicks by Device Type",
@@ -1923,6 +1944,9 @@ def render_dvm_module_performance():
                 sku_grp.index += 1
                 sku_grp.reset_index(names='Rank', inplace=True)
 
+                safe_sheet_sku = re.sub(r'[\\/*?:\[\]]', '_', f"TopSKU_{m_type}")[:30]
+                export_sheets[safe_sheet_sku] = sku_grp
+
                 st.dataframe(
                     sku_grp[['Rank', 'SKU', 'Product Name', 'Item Click Total', 'Item View Total', 'TTMs Total', 'Item CTR']]
                     .style.format({
@@ -1947,6 +1971,9 @@ def render_dvm_module_performance():
                     brand_grp['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp[col_clicks_mod] / tot_type_clicks, 0.0)
                     brand_grp = brand_grp.sort_values(by=col_clicks_mod, ascending=False).head(10)
 
+                    safe_sheet_brand = re.sub(r'[\\/*?:\[\]]', '_', f"Brand_{m_type}")[:30]
+                    export_sheets[safe_sheet_brand] = brand_grp
+
                     b_c1, b_c2 = st.columns([1, 1])
                     with b_c1:
                         st.dataframe(
@@ -1964,6 +1991,23 @@ def render_dvm_module_performance():
                         st.plotly_chart(fig_brand, use_container_width=True)
 
                 st.divider()
+
+    # --------------------------------------------------------------------------
+    # 📥 EXCEL DOWNLOAD BUTTON GENERATION
+    # --------------------------------------------------------------------------
+    if export_sheets:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, df_sheet in export_sheets.items():
+                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+
+        dl_placeholder.download_button(
+            label="⬇️ Download DVM Module Performance Report (.xlsx)",
+            data=output,
+            file_name="DVM_Module_Performance_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU

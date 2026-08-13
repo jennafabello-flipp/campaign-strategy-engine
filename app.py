@@ -1723,7 +1723,7 @@ def render_taylors_workspace():
 # ==============================================================================
 def render_dvm_module_performance():
     st.markdown("<div class='main-header'>📱 Module 5: DVM Module Performance</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload Hosted Module Reporting and Hosted Merchandise Metrics to analyze provincial engagement, daily click velocity, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload Hosted Module Reporting and Hosted Merchandise Metrics to analyze provincial engagement, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -1810,74 +1810,7 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # 2. CLICK PERCENTAGE BY DAY (MODULE VS. HOSTED ITEM CLICK PERCENTAGE)
-    st.subheader("📈 Daily Click Velocity (Module vs. Hosted Merch)")
-    
-    def find_date_column(df):
-        if df.empty: return None
-        possible_keywords = ['date', 'daily date', 'weekly date', 'daily available from', 'start date', 'available from', 'flight date', 'run date']
-        for col in df.columns:
-            if str(col).lower().strip() in possible_keywords:
-                return col
-        for col in df.columns:
-            if any(k in str(col).lower() for k in possible_keywords):
-                return col
-        return None
-
-    mod_date_col = find_date_column(df_mod)
-    merch_date_col = find_date_column(df_merch)
-
-    df_m_daily = pd.DataFrame()
-    df_h_daily = pd.DataFrame()
-
-    if not df_mod.empty and mod_date_col:
-        df_mod['Parsed_Date'] = pd.to_datetime(df_mod[mod_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
-        df_m_sub = df_mod.dropna(subset=['Parsed_Date'])
-        if not df_m_sub.empty:
-            df_m_daily = df_m_sub.groupby('Parsed_Date')[col_clicks_mod].sum().reset_index()
-            df_m_daily.columns = ['Date', 'Module Clicks']
-            tot_m_clicks = df_m_daily['Module Clicks'].sum()
-            df_m_daily['Module'] = np.where(tot_m_clicks > 0, df_m_daily['Module Clicks'] / tot_m_clicks, 0.0)
-
-    if not df_merch.empty and merch_date_col:
-        df_merch['Parsed_Date'] = pd.to_datetime(df_merch[merch_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
-        df_h_sub = df_merch.dropna(subset=['Parsed_Date'])
-        if not df_h_sub.empty:
-            df_h_daily = df_h_sub.groupby('Parsed_Date')['Clicks'].sum().reset_index()
-            df_h_daily.columns = ['Date', 'Hosted Clicks']
-            tot_h_clicks = df_h_daily['Hosted Clicks'].sum()
-            df_h_daily['Hosted'] = np.where(tot_h_clicks > 0, df_h_daily['Hosted Clicks'] / tot_h_clicks, 0.0)
-
-    if not df_m_daily.empty or not df_h_daily.empty:
-        if not df_m_daily.empty and not df_h_daily.empty:
-            merged_daily = pd.merge(df_m_daily[['Date', 'Module']], df_h_daily[['Date', 'Hosted']], on='Date', how='outer').fillna(0.0)
-        elif not df_m_daily.empty:
-            merged_daily = df_m_daily[['Date', 'Module']].copy()
-        else:
-            merged_daily = df_h_daily[['Date', 'Hosted']].copy()
-
-        merged_daily = merged_daily.dropna(subset=['Date']).sort_values('Date')
-        plot_cols = [c for c in ['Module', 'Hosted'] if c in merged_daily.columns]
-        df_melt = merged_daily.melt(id_vars='Date', value_vars=plot_cols, var_name='Source', value_name='Click Percentage')
-
-        fig_line = px.line(
-            df_melt, x='Date', y='Click Percentage', color='Source',
-            markers=True, title="THDCA DVM Module Vs Hosted Item Click Percentage by Day",
-            color_discrete_map={'Module': '#1f536e', 'Hosted': '#e06d2d'}
-        )
-
-        fig_line.update_layout(
-            yaxis=dict(tickformat='.2%', title=None),
-            xaxis=dict(title=None, type='category', tickangle=-45),
-            legend=dict(title=None, orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)
-        )
-        st.plotly_chart(fig_line, use_container_width=True)
-    else:
-        st.warning("⚠️ Could not locate a date column in the uploaded files.")
-
-    st.write("---")
-
-    # 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
+    # 2. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
     if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
         st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
         
@@ -1893,7 +1826,7 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # MULTI-MODULE PROCESSING RULE (ITEMS 4 & 5 REPEATED PER MODULE TYPE)
+    # 3. MULTI-MODULE PROCESSING RULE (TOP SKUS & TOP BRANDS PER MODULE TYPE)
     if not df_mod.empty and col_type_mod in df_mod.columns:
         unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
         
@@ -1916,7 +1849,7 @@ def render_dvm_module_performance():
 
                 item_name_col = 'Name' if 'Name' in df_combined_sku.columns else ('Name_merch' if 'Name_merch' in df_combined_sku.columns else col_sku_mod)
 
-                # 4. TOP 20 SKUS TABLE
+                # TOP 20 SKUS TABLE
                 st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
                 
                 sku_grp = df_combined_sku.groupby(['Clean_SKU', item_name_col]).agg({
@@ -1951,7 +1884,7 @@ def render_dvm_module_performance():
 
                 st.write("")
 
-                # 5. TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
+                # TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
                 brand_col_type = next((c for c in df_type_sub.columns if str(c).lower().strip() == 'brand'), None)
                 
                 if brand_col_type and brand_col_type in df_type_sub.columns:
@@ -1979,7 +1912,6 @@ def render_dvm_module_performance():
                         st.plotly_chart(fig_brand, use_container_width=True)
 
                 st.divider()
-
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU
 # ---------------------------------------------------------

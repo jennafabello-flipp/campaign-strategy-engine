@@ -1811,50 +1811,64 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # 2. CLICK PERCENTAGE BY DAY (MODULE + HOSTED MERCH DATA COMBINED)
-    st.subheader("📈 Daily Click Velocity (Module & Hosted Merch Data Combined)")
+    # --------------------------------------------------------------------------
+    # 📈 2. CLICK PERCENTAGE BY DAY (MODULE VS. HOSTED ITEM CLICK PERCENTAGE)
+    # --------------------------------------------------------------------------
+    st.subheader("📈 Daily Click Velocity (Module vs. Hosted Merch)")
     
-    date_series_list = []
-    
-    if not df_mod.empty:
-        mod_date_col = next((c for c in df_mod.columns if 'date' in str(c).lower()), None)
-        if mod_date_col:
-            df_m_date = df_mod.groupby(pd.to_datetime(df_mod[mod_date_col], errors='coerce').dt.date)[col_clicks_mod].sum().reset_index()
-            df_m_date.columns = ['Date', 'Module Clicks']
-            date_series_list.append(df_m_date)
+    # 1. Identify Date Columns Safely
+    mod_date_col = next((c for c in df_mod.columns if any(k in str(c).lower() for k in ['date', 'available from', 'start date', 'flight'])), None) if not df_mod.empty else None
+    merch_date_col = next((c for c in df_merch.columns if any(k in str(c).lower() for k in ['date', 'available from', 'start date'])), None) if not df_merch.empty else None
 
-    if not df_merch.empty and 'Date' in df_merch.columns:
-        df_merch_date = df_merch.groupby(df_merch['Date'].dt.date)['Clicks'].sum().reset_index()
-        df_merch_date.columns = ['Date', 'Hosted Merch Clicks']
-        date_series_list.append(df_merch_date)
+    df_m_daily = pd.DataFrame()
+    df_h_daily = pd.DataFrame()
 
-    if date_series_list:
-        merged_daily = date_series_list[0]
-        for ds in date_series_list[1:]:
-            merged_daily = pd.merge(merged_daily, ds, on='Date', how='outer').fillna(0)
+    # Process Module Daily Clicks & Daily Share %
+    if not df_mod.empty and mod_date_col:
+        df_mod['Parsed_Date'] = pd.to_datetime(df_mod[mod_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+        df_m_daily = df_mod.groupby('Parsed_Date')[col_clicks_mod].sum().reset_index()
+        df_m_daily.columns = ['Date', 'Module Clicks']
+        tot_m_clicks = df_m_daily['Module Clicks'].sum()
+        df_m_daily['Module'] = np.where(tot_m_clicks > 0, df_m_daily['Module Clicks'] / tot_m_clicks, 0.0)
+
+    # Process Hosted Merch Daily Clicks & Daily Share %
+    if not df_merch.empty and merch_date_col:
+        df_merch['Parsed_Date'] = pd.to_datetime(df_merch[merch_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
+        df_h_daily = df_merch.groupby('Parsed_Date')['Clicks'].sum().reset_index()
+        df_h_daily.columns = ['Date', 'Hosted Clicks']
+        tot_h_clicks = df_h_daily['Hosted Clicks'].sum()
+        df_h_daily['Hosted'] = np.where(tot_h_clicks > 0, df_h_daily['Hosted Clicks'] / tot_h_clicks, 0.0)
+
+    # Merge Both Datasets on Date
+    if not df_m_daily.empty or not df_h_daily.empty:
+        if not df_m_daily.empty and not df_h_daily.empty:
+            merged_daily = pd.merge(df_m_daily[['Date', 'Module']], df_h_daily[['Date', 'Hosted']], on='Date', how='outer').fillna(0.0)
+        elif not df_m_daily.empty:
+            merged_daily = df_m_daily[['Date', 'Module']].copy()
+        else:
+            merged_daily = df_h_daily[['Date', 'Hosted']].copy()
 
         merged_daily = merged_daily.dropna(subset=['Date']).sort_values('Date')
-        
-        click_cols = [c for c in merged_daily.columns if c != 'Date']
-        tot_daily_clicks = merged_daily[click_cols].sum().sum()
 
-        if tot_daily_clicks > 0:
-            for c in click_cols:
-                merged_daily[f"{c} %"] = merged_daily[c] / tot_daily_clicks
+        # Melt for Plotly line chart
+        plot_cols = [c for c in ['Module', 'Hosted'] if c in merged_daily.columns]
+        df_melt = merged_daily.melt(id_vars='Date', value_vars=plot_cols, var_name='Source', value_name='Click Percentage')
 
-            fig_line = px.line(
-                merged_daily, x='Date', y=[f"{c} %" for c in click_cols],
-                markers=True, title="Daily Click Share Trend (% of Total Volume)"
-            )
-            fig_line.update_layout(yaxis=dict(tickformat='.2%'), xaxis=dict(title=None), legend=dict(title="Source"))
-            st.plotly_chart(fig_line, use_container_width=True)
-        else:
-            st.info("No click volume detected across date ranges.")
+        # Generate Chart Matching Original Design
+        fig_line = px.line(
+            df_melt, x='Date', y='Click Percentage', color='Source',
+            markers=True, title="THDCA DVM Module Vs Hosted Item Click Percentage by Day",
+            color_discrete_map={'Module': '#1f536e', 'Hosted': '#e06d2d'}
+        )
+
+        fig_line.update_layout(
+            yaxis=dict(tickformat='.2%', title=None),
+            xaxis=dict(title=None, type='category', tickangle=-45),
+            legend=dict(title=None, orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)
+        )
+        st.plotly_chart(fig_line, use_container_width=True)
     else:
-        st.info("⚠️ Daily date fields were not identified in the uploaded file(s).")
-
-    st.write("---")
-
+        st.warning("⚠️ Could not match date fields between Module Reporting and Hosted Merch files. Please ensure both files contain date/available window columns.")
     # 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
     if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
         st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")

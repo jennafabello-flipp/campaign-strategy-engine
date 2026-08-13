@@ -59,7 +59,7 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
         header_idx = 0
         for i in range(min(30, len(df_raw))):
             row_vals = [str(x).lower().strip() for x in df_raw.iloc[i].values]
-            if 'merchandise name' in row_vals or 'total item views' in row_vals or 'sku' in row_vals:
+            if 'merchandise name' in row_vals or 'total item views' in row_vals or 'sku' in row_vals or 'item views' in row_vals:
                 header_idx = i
                 break
                 
@@ -76,17 +76,28 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
             return None
 
         mapping = {
-            'sku': get_col(['SKU', 'Merchandise ID']), 'name': get_col(['Merchandise Name', 'Name']),
+            'sku': get_col(['Sku', 'SKU', 'Merchandise ID']), 
+            'name': get_col(['Merchandise Name', 'Name']),
             'date': get_col(['Daily Available From', 'Date', 'Start Date']),
             'run_id': get_col(['Flyer Run ID', 'Run ID', 'Campaign ID']),
             'run_name': get_col(['Flyer Description', 'Flyer Run Name', 'Campaign Name']),
-            'display_type': get_col(['Display Type']), 'page': get_col(['Page Position', 'Page']),
-            'brand': get_col(['Brand', 'Manufacturer']), 'orig_price': get_col(['Total Original Price', 'Original Price']),
-            'curr_price': get_col(['Total Current Price', 'Current Price']), 'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
-            'c1': get_col(['Custom ID 1']), 'c2': get_col(['Custom ID 2']), 'c3': get_col(['Custom ID 3']),
-            'ret_cat': get_col(['Retailer Category']), 'goo_l1': get_col(['Google Category L1']), 'goo_l2': get_col(['Google Category L2']), 'goo_l3': get_col(['Google Category L3']),
-            'views': get_col(['Total Item Views', 'Views']), 'clicks': get_col(['Total Item Clicks', 'Clicks']),
-            'clips': get_col(['Total Clippings', 'Clips']), 'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTMS'])
+            'display_type': get_col(['Display Type']), 
+            'page': get_col(['Page Position', 'Page']),
+            'brand': get_col(['Brand', 'Manufacturer']), 
+            'orig_price': get_col(['Total Original Price', 'Original Price']),
+            'curr_price': get_col(['Total Current Price', 'Current Price']), 
+            'url': get_col(['URL', 'Destination URL', 'Link', 'Destination Link']),
+            'c1': get_col(['Custom ID 1']), 
+            'c2': get_col(['Custom ID 2']), 
+            'c3': get_col(['Custom ID 3']),
+            'ret_cat': get_col(['Retailer Category']), 
+            'goo_l1': get_col(['Google Category L1', 'Google Cat']), 
+            'goo_l2': get_col(['Google Category L2']), 
+            'goo_l3': get_col(['Google Category L3']),
+            'views': get_col(['Total Item Views', 'Item Views', 'Views']), 
+            'clicks': get_col(['Total Item Clicks', 'Item Clicks', 'Clicks']),
+            'clips': get_col(['Total Clippings', 'Clips']), 
+            'ttms': get_col(['Total Transfer to Merchant (TTMs)', 'Total Transfer to Merchant', 'TTM', 'TTMS'])
         }
         return df_clean, mapping, header_idx
     except Exception as e:
@@ -94,10 +105,6 @@ def scrub_and_load_excel(file_obj, is_local_path=False):
         return None, None, None
 
 def parse_and_combine_multiple_files(uploaded_files):
-    """
-    Sequentially reads and scrubs multiple uploaded files,
-    preserving exact column mappings before concatenating.
-    """
     if not uploaded_files:
         return pd.DataFrame(), None
 
@@ -435,6 +442,8 @@ def render_single_campaign_matrix():
         st.info("⚠️ **Waiting for data:** Please upload one or more Merchandise or Scroll Depth files to begin analysis.")
         return
 
+    df_prod = pd.DataFrame()
+    df_creative = pd.DataFrame()
     pivot_top = cat_l1_agg = cat_l2_agg = cat_l3_agg = brand_agg = cr_agg = p_agg = d_agg = s_agg_sorted = pd.DataFrame()
     df_sc_table = pd.DataFrame()
     weekly_scroll = pd.DataFrame()
@@ -1311,7 +1320,6 @@ def render_taylors_workspace():
     with col1: merch_file = st.file_uploader("1️⃣ Upload Merchandise Metrics", type=["xlsx", "csv"], key="taylor_merch")
     with col2: fsa_files = st.file_uploader("2️⃣ Upload FSA Zone Reports (Multiple Allowed)", type=["xlsx", "csv"], accept_multiple_files=True, key="taylor_fsa")
 
-    # Define paths strictly before checking existence
     usps_path_csv = "reference_data/usps_reference.csv"
     usps_path_xlsx = "reference_data/usps_reference.xlsx"
     usps_path = None
@@ -1708,6 +1716,251 @@ def render_taylors_workspace():
                 
             st.divider()
 
+# ==============================================================================
+# 📱 MODULE 5: DVM MODULE PERFORMANCE
+# ==============================================================================
+def render_dvm_module_performance():
+    st.markdown("<div class='main-header'>📱 Module 5: DVM Module Performance</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload Hosted Module Reporting and Hosted Merchandise Metrics to analyze provincial engagement, daily click velocity, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        module_file = st.file_uploader("1️⃣ Upload Hosted Module Reporting (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_module")
+    with col2:
+        merch_file = st.file_uploader("2️⃣ Upload Hosted Merchandise Metrics (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_merch")
+
+    if not module_file and not merch_file:
+        st.info("⚠️ **Awaiting Data:** Please upload Hosted Module Reporting, Hosted Merchandise Metrics, or both to run the analysis.")
+        return
+
+    df_mod = pd.DataFrame()
+    df_merch = pd.DataFrame()
+
+    if module_file:
+        df_mod, m_mod, _ = scrub_and_load_excel(module_file)
+        if df_mod is not None:
+            # Map specific Module reporting columns
+            col_sku_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['sku', 'item sku', 'product sku']), 'Sku')
+            col_prov_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['state or province', 'province', 'state', 'region']), 'State Or Province')
+            col_dev_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['device', 'platform']), 'Device')
+            col_pos_mod = next((c for c in df_mod.columns if 'position' in str(c).lower() or 'iter' in str(c).lower()), 'Module Item Position')
+            col_type_mod = next((c for c in df_mod.columns if 'module type' in str(c).lower() or str(c).lower().strip() == 'type'), 'Module Type')
+            col_clicks_mod = next((c for c in df_mod.columns if 'total item clicks' in str(c).lower() or 'item clicks' in str(c).lower() or str(c).lower().strip() == 'clicks'), 'Total Item Clicks')
+            col_views_mod = next((c for c in df_mod.columns if 'item views' in str(c).lower() or 'total item views' in str(c).lower() or str(c).lower().strip() == 'views'), 'Item Views')
+            col_ttm_mod = next((c for c in df_mod.columns if str(c).lower().strip() in ['ttm', 'ttms', 'total transfer to merchant (ttms)', 'item ttms']), 'TTM')
+
+            # Ensure numeric safety
+            for c in [col_clicks_mod, col_views_mod, col_ttm_mod]:
+                if c in df_mod.columns:
+                    df_mod[c] = pd.to_numeric(df_mod[c].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+                else:
+                    df_mod[c] = 0
+
+            # SKU padding
+            if col_sku_mod in df_mod.columns:
+                df_mod['Clean_SKU'] = df_mod[col_sku_mod].astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
+            else:
+                df_mod['Clean_SKU'] = 'UNKNOWN'
+
+    if merch_file:
+        df_merch_raw, m_merch, _ = scrub_and_load_excel(merch_file)
+        if df_merch_raw is not None:
+            df_merch, _, _ = process_metrics(df_merch_raw, m_merch)
+            if 'SKU' in df_merch.columns:
+                df_merch['Clean_SKU'] = df_merch['SKU'].astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
+            else:
+                df_merch['Clean_SKU'] = 'UNKNOWN'
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # 🗺️ 1. CLICK PERCENTAGE BY PROVINCE / STATE (HEATMAP - MODULE DATA ONLY)
+    # --------------------------------------------------------------------------
+    if not df_mod.empty and col_prov_mod in df_mod.columns:
+        st.subheader("🗺️ Regional Click Share Heatmap (Province / State)")
+        
+        prov_agg = df_mod.groupby(col_prov_mod)[col_clicks_mod].sum().reset_index()
+        tot_mod_clicks = prov_agg[col_clicks_mod].sum()
+        prov_agg['Click Share %'] = np.where(tot_mod_clicks > 0, prov_agg[col_clicks_mod] / tot_mod_clicks, 0.0)
+
+        c_map1, c_map2 = st.columns([1, 2])
+        with c_map1:
+            st.markdown("**Provincial / State Breakdown**")
+            st.dataframe(
+                prov_agg.sort_values(by='Click Share %', ascending=False)
+                .style.format({col_clicks_mod: '{:,.0f}', 'Click Share %': '{:.2%}'}),
+                use_container_width=True, hide_index=True
+            )
+
+        with c_map2:
+            fig_map = px.choropleth(
+                prov_agg,
+                locations=col_prov_mod,
+                locationmode="USA-states",
+                color='Click Share %',
+                scope="north america",
+                color_continuous_scale="Blues",
+                title="Regional Click Density (% Share)"
+            )
+            fig_map.update_layout(margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig_map, use_container_width=True)
+
+        st.write("---")
+
+    # --------------------------------------------------------------------------
+    # 📈 2. CLICK PERCENTAGE BY DAY (MODULE + HOSTED MERCH DATA COMBINED)
+    # --------------------------------------------------------------------------
+    st.subheader("📈 Daily Click Velocity (Module & Hosted Merch Data Combined)")
+    
+    date_series_list = []
+    
+    if not df_mod.empty:
+        mod_date_col = next((c for c in df_mod.columns if 'date' in str(c).lower()), None)
+        if mod_date_col:
+            df_m_date = df_mod.groupby(pd.to_datetime(df_mod[mod_date_col], errors='coerce').dt.date)[col_clicks_mod].sum().reset_index()
+            df_m_date.columns = ['Date', 'Module Clicks']
+            date_series_list.append(df_m_date)
+
+    if not df_merch.empty and 'Date' in df_merch.columns:
+        df_merch_date = df_merch.groupby(df_merch['Date'].dt.date)['Clicks'].sum().reset_index()
+        df_merch_date.columns = ['Date', 'Hosted Merch Clicks']
+        date_series_list.append(df_merch_date)
+
+    if date_series_list:
+        merged_daily = date_series_list[0]
+        for ds in date_series_list[1:]:
+            merged_daily = pd.merge(merged_daily, ds, on='Date', how='outer').fillna(0)
+
+        merged_daily = merged_daily.dropna(subset=['Date']).sort_values('Date')
+        
+        click_cols = [c for c in merged_daily.columns if c != 'Date']
+        tot_daily_clicks = merged_daily[click_cols].sum().sum()
+
+        if tot_daily_clicks > 0:
+            for c in click_cols:
+                merged_daily[f"{c} %"] = merged_daily[c] / tot_daily_clicks
+
+            fig_line = px.line(
+                merged_daily, x='Date', y=[f"{c} %" for c in click_cols],
+                markers=True, title="Daily Click Share Trend (% of Total Volume)"
+            )
+            fig_line.update_layout(yaxis=dict(tickformat='.2%'), xaxis=dict(title=None), legend=dict(title="Source"))
+            st.plotly_chart(fig_line, use_container_width=True)
+        else:
+            st.info("No click volume detected across date ranges.")
+    else:
+        st.info("⚠️ Daily date fields were not identified in the uploaded file(s).")
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # 📊 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
+    # --------------------------------------------------------------------------
+    if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
+        st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
+        
+        pos_agg = df_mod.groupby([col_pos_mod, col_dev_mod])[col_clicks_mod].sum().reset_index()
+        
+        fig_pos = px.bar(
+            pos_agg, x=col_pos_mod, y=col_clicks_mod, color=col_dev_mod,
+            barmode='group', title="Module Item Position Clicks by Device Type",
+            color_discrete_sequence=['#0054B7', '#43c4f4']
+        )
+        fig_pos.update_layout(yaxis=dict(title="Item Clicks"), xaxis=dict(title="Module Item Position"), legend=dict(title="Device"))
+        st.plotly_chart(fig_pos, use_container_width=True)
+
+        st.write("---")
+
+    # --------------------------------------------------------------------------
+    # 🔄 MODULE TYPE LOOP (ITEMS 4 & 5 SPLIT BY MODULE TYPE)
+    # --------------------------------------------------------------------------
+    if not df_mod.empty and col_type_mod in df_mod.columns:
+        unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
+        
+        if unique_types:
+            st.subheader("🎯 Performance Deep-Dive by Module Type")
+            st.caption(f"Detected **{len(unique_types)}** unique Module Type(s). Evaluating Top SKUs and Brand Momentum per format.")
+
+            for m_type in unique_types:
+                st.markdown(f"### 📦 Module Format: `{m_type}`")
+                df_type_sub = df_mod[df_mod[col_type_mod] == m_type].copy()
+
+                # Merge Hosted Merch Data if SKU matched
+                if not df_merch.empty and 'Clean_SKU' in df_type_sub.columns and 'Clean_SKU' in df_merch.columns:
+                    df_combined_sku = pd.merge(
+                        df_type_sub, 
+                        df_merch[['Clean_SKU', 'Name', 'TTMs']].drop_duplicates(subset=['Clean_SKU']),
+                        on='Clean_SKU', how='left', suffixes=('', '_merch')
+                    )
+                else:
+                    df_combined_sku = df_type_sub.copy()
+
+                item_name_col = 'Name' if 'Name' in df_combined_sku.columns else ('Name_merch' if 'Name_merch' in df_combined_sku.columns else col_sku_mod)
+
+                # 4. TOP 20 SKUS TABLE
+                st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
+                
+                sku_grp = df_combined_sku.groupby(['Clean_SKU', item_name_col]).agg({
+                    col_clicks_mod: 'sum',
+                    col_views_mod: 'sum',
+                    col_ttm_mod: 'sum'
+                }).reset_index()
+
+                sku_grp.rename(columns={
+                    'Clean_SKU': 'SKU',
+                    item_name_col: 'Product Name',
+                    col_clicks_mod: 'Item Click Total',
+                    col_views_mod: 'Item View Total',
+                    col_ttm_mod: 'TTMs Total'
+                }, inplace=True)
+
+                sku_grp['Item CTR'] = np.where(sku_grp['Item View Total'] > 0, sku_grp['Item Click Total'] / sku_grp['Item View Total'], 0.0)
+                sku_grp = sku_grp.sort_values(by='Item Click Total', ascending=False).head(20).reset_index(drop=True)
+                sku_grp.index += 1
+                sku_grp.reset_index(names='Rank', inplace=True)
+
+                st.dataframe(
+                    sku_grp[['Rank', 'SKU', 'Product Name', 'Item Click Total', 'Item View Total', 'TTMs Total', 'Item CTR']]
+                    .style.format({
+                        'Item Click Total': '{:,.0f}',
+                        'Item View Total': '{:,.0f}',
+                        'TTMs Total': '{:,.0f}',
+                        'Item CTR': '{:.2%}'
+                    }),
+                    use_container_width=True, hide_index=True
+                )
+
+                st.write("")
+
+                # 5. TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
+                brand_col_type = next((c for c in df_type_sub.columns if str(c).lower().strip() == 'brand'), None)
+                
+                if brand_col_type and brand_col_type in df_type_sub.columns:
+                    st.markdown(f"**🏷️ Top Performing Brands by Click Share (`{m_type}`)**")
+                    
+                    brand_grp = df_type_sub.groupby(brand_col_type)[col_clicks_mod].sum().reset_index()
+                    tot_type_clicks = brand_grp[col_clicks_mod].sum()
+                    brand_grp['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp[col_clicks_mod] / tot_type_clicks, 0.0)
+                    brand_grp = brand_grp.sort_values(by=col_clicks_mod, ascending=False).head(10)
+
+                    b_c1, b_c2 = st.columns([1, 1])
+                    with b_c1:
+                        st.dataframe(
+                            brand_grp.style.format({col_clicks_mod: '{:,.0f}', 'Item Click Share %': '{:.2%}'}),
+                            use_container_width=True, hide_index=True
+                        )
+
+                    with b_c2:
+                        fig_brand = px.bar(
+                            brand_grp, x=brand_col_type, y='Item Click Share %',
+                            title=f"Brand Share % ({m_type})",
+                            color_discrete_sequence=['#0054B7']
+                        )
+                        fig_brand.update_layout(yaxis=dict(tickformat='.1%'), xaxis=dict(title=None))
+                        st.plotly_chart(fig_brand, use_container_width=True)
+
+                st.divider()
+
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU
 # ---------------------------------------------------------
@@ -1717,7 +1970,8 @@ pipeline_mode = st.sidebar.radio(
         "🗂️ Module 1: Campaign Performance Breakdown", 
         "⚖️ Module 2: Head-to-Head Comparison", 
         "🏆 Module 3: Industry Benchmarks", 
-        "🛒 Module 4: Taylor's Workspace"
+        "🛒 Module 4: Taylor's Workspace",
+        "📱 Module 5: DVM Module Performance"
     ]
 )
 
@@ -1732,3 +1986,5 @@ elif "Industry Benchmarks" in pipeline_mode or "Module 3" in pipeline_mode:
     render_benchmark_scorecard()
 elif "Taylor" in pipeline_mode or "Module 4" in pipeline_mode:
     render_taylors_workspace()
+elif "DVM Module" in pipeline_mode or "Module 5" in pipeline_mode:
+    render_dvm_module_performance()

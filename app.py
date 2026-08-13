@@ -1778,39 +1778,84 @@ def render_dvm_module_performance():
 
     st.write("---")
 
-    # 1. CLICK PERCENTAGE BY PROVINCE / STATE (HEATMAP)
+    # --------------------------------------------------------------------------
+    # 🗺️ 1. DYNAMIC REGIONAL MAP (CANADA OR USA AUTO-DETECTED)
+    # --------------------------------------------------------------------------
     if not df_mod.empty and col_prov_mod in df_mod.columns:
-        st.subheader("🗺️ Regional Click Share Heatmap (Province / State)")
+        st.subheader("🗺️ Regional Click Share Heatmap")
         
+        prov_name_map_ca = {
+            'ON': 'Ontario', 'QC': 'Quebec', 'BC': 'British Columbia',
+            'AB': 'Alberta', 'MB': 'Manitoba', 'NS': 'Nova Scotia',
+            'NB': 'New Brunswick', 'SK': 'Saskatchewan', 
+            'NL': 'Newfoundland and Labrador', 'PE': 'Prince Edward Island',
+            'NT': 'Northwest Territories', 'YT': 'Yukon', 'NU': 'Nunavut'
+        }
+
         prov_agg = df_mod.groupby(col_prov_mod)[col_clicks_mod].sum().reset_index()
         tot_mod_clicks = prov_agg[col_clicks_mod].sum()
         prov_agg['Click Share %'] = np.where(tot_mod_clicks > 0, prov_agg[col_clicks_mod] / tot_mod_clicks, 0.0)
+        
+        prov_agg['Region_Code'] = prov_agg[col_prov_mod].astype(str).str.strip().str.upper()
+        prov_agg['Province_Name'] = prov_agg['Region_Code'].map(prov_name_map_ca).fillna(prov_agg['Region_Code'])
+
+        raw_locs = prov_agg['Region_Code'].unique()
+        ca_matches = sum(1 for loc in raw_locs if loc in prov_name_map_ca)
+        is_canada_data = (ca_matches / len(raw_locs) > 0.3) if len(raw_locs) > 0 else False
 
         c_map1, c_map2 = st.columns([1, 2])
         with c_map1:
-            st.markdown("**Provincial / State Breakdown**")
+            st.markdown(f"**{'Provincial' if is_canada_data else 'State'} Breakdown**")
             st.dataframe(
-                prov_agg.sort_values(by='Click Share %', ascending=False)
-                .style.format({col_clicks_mod: '{:,.0f}', 'Click Share %': '{:.2%}'}),
+                prov_agg[['Region_Code', col_clicks_mod, 'Click Share %']]
+                .sort_values(by='Click Share %', ascending=False)
+                .rename(columns={'Region_Code': 'Region', col_clicks_mod: 'Item Clicks'})
+                .style.format({'Item Clicks': '{:,.0f}', 'Click Share %': '{:.2%}'}),
                 use_container_width=True, hide_index=True
             )
 
         with c_map2:
-            fig_map = px.choropleth(
-                prov_agg,
-                locations=col_prov_mod,
-                locationmode="USA-states",
-                color='Click Share %',
-                scope="north america",
-                color_continuous_scale="Blues",
-                title="Regional Click Density (% Share)"
+            if is_canada_data:
+                canada_geojson = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/canada.geojson"
+                
+                fig_map = px.choropleth(
+                    prov_agg,
+                    geojson=canada_geojson,
+                    featureidkey="properties.name",
+                    locations="Province_Name",
+                    color='Click Share %',
+                    color_continuous_scale="Blues",
+                    title="THDCA DVM Module Click Percentage by Province"
+                )
+                
+                fig_map.update_geos(
+                    fitbounds="locations", 
+                    visible=False,
+                    projection_type="conic conformal"
+                )
+            else:
+                fig_map = px.choropleth(
+                    prov_agg,
+                    locations="Region_Code",
+                    locationmode="USA-states",
+                    color='Click Share %',
+                    scope="usa",
+                    color_continuous_scale="Blues",
+                    title="DVM Module Click Percentage by State"
+                )
+
+            fig_map.update_layout(
+                margin=dict(l=0, r=0, t=40, b=0),
+                coloraxis_colorbar=dict(title="Click Share %", tickformat=".1%")
             )
-            fig_map.update_layout(margin=dict(l=0, r=0, t=30, b=0))
+            
             st.plotly_chart(fig_map, use_container_width=True)
 
         st.write("---")
 
-    # 2. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
+    # --------------------------------------------------------------------------
+    # 📊 2. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
+    # --------------------------------------------------------------------------
     if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
         st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
         
@@ -1826,7 +1871,9 @@ def render_dvm_module_performance():
 
         st.write("---")
 
-    # 3. MULTI-MODULE PROCESSING RULE (TOP SKUS & TOP BRANDS PER MODULE TYPE)
+    # --------------------------------------------------------------------------
+    # 🎯 3. MULTI-MODULE PROCESSING RULE (TOP SKUS & BRANDS PER MODULE TYPE)
+    # --------------------------------------------------------------------------
     if not df_mod.empty and col_type_mod in df_mod.columns:
         unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
         
@@ -1912,6 +1959,7 @@ def render_dvm_module_performance():
                         st.plotly_chart(fig_brand, use_container_width=True)
 
                 st.divider()
+
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU
 # ---------------------------------------------------------

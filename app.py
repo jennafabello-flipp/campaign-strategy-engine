@@ -1816,28 +1816,61 @@ def render_dvm_module_performance():
     # --------------------------------------------------------------------------
     st.subheader("📈 Daily Click Velocity (Module vs. Hosted Merch)")
     
-    # 1. Identify Date Columns Safely
-    mod_date_col = next((c for c in df_mod.columns if any(k in str(c).lower() for k in ['date', 'available from', 'start date', 'flight'])), None) if not df_mod.empty else None
-    merch_date_col = next((c for c in df_merch.columns if any(k in str(c).lower() for k in ['date', 'available from', 'start date'])), None) if not df_merch.empty else None
+    # Expanded Date Column Finder
+    def find_date_column(df):
+        if df.empty: return None
+        # Check exact and fuzzy keywords
+        possible_keywords = ['date', 'daily date', 'weekly date', 'daily available from', 'start date', 'available from', 'flight date', 'run date']
+        
+        # 1. Exact match priority
+        for col in df.columns:
+            if str(col).lower().strip() in possible_keywords:
+                return col
+                
+        # 2. Fuzzy match priority
+        for col in df.columns:
+            if any(k in str(col).lower() for k in possible_keywords):
+                return col
+                
+        # 3. Fallback: Check if any column contains parseable datetime values
+        for col in df.columns:
+            if 'name' not in str(col).lower() and 'sku' not in str(col).lower() and 'id' not in str(col).lower():
+                sample = df[col].dropna().head(10)
+                try:
+                    parsed = pd.to_datetime(sample, errors='coerce')
+                    if parsed.notna().sum() > 5:
+                        return col
+                except:
+                    pass
+        return None
+
+    mod_date_col = find_date_column(df_mod)
+    merch_date_col = find_date_column(df_merch)
 
     df_m_daily = pd.DataFrame()
     df_h_daily = pd.DataFrame()
 
-    # Process Module Daily Clicks & Daily Share %
+    # Process Module Daily Clicks & Share %
     if not df_mod.empty and mod_date_col:
         df_mod['Parsed_Date'] = pd.to_datetime(df_mod[mod_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
-        df_m_daily = df_mod.groupby('Parsed_Date')[col_clicks_mod].sum().reset_index()
-        df_m_daily.columns = ['Date', 'Module Clicks']
-        tot_m_clicks = df_m_daily['Module Clicks'].sum()
-        df_m_daily['Module'] = np.where(tot_m_clicks > 0, df_m_daily['Module Clicks'] / tot_m_clicks, 0.0)
+        df_m_sub = df_mod.dropna(subset=['Parsed_Date'])
+        
+        if not df_m_sub.empty:
+            df_m_daily = df_m_sub.groupby('Parsed_Date')[col_clicks_mod].sum().reset_index()
+            df_m_daily.columns = ['Date', 'Module Clicks']
+            tot_m_clicks = df_m_daily['Module Clicks'].sum()
+            df_m_daily['Module'] = np.where(tot_m_clicks > 0, df_m_daily['Module Clicks'] / tot_m_clicks, 0.0)
 
-    # Process Hosted Merch Daily Clicks & Daily Share %
+    # Process Hosted Merch Daily Clicks & Share %
     if not df_merch.empty and merch_date_col:
         df_merch['Parsed_Date'] = pd.to_datetime(df_merch[merch_date_col], errors='coerce').dt.strftime('%Y-%m-%d')
-        df_h_daily = df_merch.groupby('Parsed_Date')['Clicks'].sum().reset_index()
-        df_h_daily.columns = ['Date', 'Hosted Clicks']
-        tot_h_clicks = df_h_daily['Hosted Clicks'].sum()
-        df_h_daily['Hosted'] = np.where(tot_h_clicks > 0, df_h_daily['Hosted Clicks'] / tot_h_clicks, 0.0)
+        df_h_sub = df_merch.dropna(subset=['Parsed_Date'])
+        
+        if not df_h_sub.empty:
+            df_h_daily = df_h_sub.groupby('Parsed_Date')['Clicks'].sum().reset_index()
+            df_h_daily.columns = ['Date', 'Hosted Clicks']
+            tot_h_clicks = df_h_daily['Hosted Clicks'].sum()
+            df_h_daily['Hosted'] = np.where(tot_h_clicks > 0, df_h_daily['Hosted Clicks'] / tot_h_clicks, 0.0)
 
     # Merge Both Datasets on Date
     if not df_m_daily.empty or not df_h_daily.empty:
@@ -1850,7 +1883,7 @@ def render_dvm_module_performance():
 
         merged_daily = merged_daily.dropna(subset=['Date']).sort_values('Date')
 
-        # Melt for Plotly line chart
+        # Melt for Plotly dual-line chart
         plot_cols = [c for c in ['Module', 'Hosted'] if c in merged_daily.columns]
         df_melt = merged_daily.melt(id_vars='Date', value_vars=plot_cols, var_name='Source', value_name='Click Percentage')
 
@@ -1868,81 +1901,7 @@ def render_dvm_module_performance():
         )
         st.plotly_chart(fig_line, use_container_width=True)
     else:
-        st.warning("⚠️ Could not match date fields between Module Reporting and Hosted Merch files. Please ensure both files contain date/available window columns.")
-    # 3. ITEM CLICKS BY MODULE POSITION (DESKTOP VS. MOBILE)
-    if not df_mod.empty and col_pos_mod in df_mod.columns and col_dev_mod in df_mod.columns:
-        st.subheader("📊 Item Clicks by Module Position (Desktop vs. Mobile)")
-        
-        pos_agg = df_mod.groupby([col_pos_mod, col_dev_mod])[col_clicks_mod].sum().reset_index()
-        
-        fig_pos = px.bar(
-            pos_agg, x=col_pos_mod, y=col_clicks_mod, color=col_dev_mod,
-            barmode='group', title="Module Item Position Clicks by Device Type",
-            color_discrete_sequence=['#0054B7', '#43c4f4']
-        )
-        fig_pos.update_layout(yaxis=dict(title="Item Clicks"), xaxis=dict(title="Module Item Position"), legend=dict(title="Device"))
-        st.plotly_chart(fig_pos, use_container_width=True)
-
-        st.write("---")
-
-    # MULTI-MODULE PROCESSING RULE (ITEMS 4 & 5 REPEATED PER MODULE TYPE)
-    if not df_mod.empty and col_type_mod in df_mod.columns:
-        unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
-        
-        if unique_types:
-            st.subheader("🎯 Performance Deep-Dive by Module Type")
-            st.caption(f"Detected **{len(unique_types)}** unique Module Type(s). Evaluating Top SKUs and Brand Momentum per format.")
-
-            for m_type in unique_types:
-                st.markdown(f"### 📦 Module Format: `{m_type}`")
-                df_type_sub = df_mod[df_mod[col_type_mod] == m_type].copy()
-
-                if not df_merch.empty and 'Clean_SKU' in df_type_sub.columns and 'Clean_SKU' in df_merch.columns:
-                    df_combined_sku = pd.merge(
-                        df_type_sub, 
-                        df_merch[['Clean_SKU', 'Name', 'TTMs']].drop_duplicates(subset=['Clean_SKU']),
-                        on='Clean_SKU', how='outer', suffixes=('', '_merch')
-                    )
-                else:
-                    df_combined_sku = df_type_sub.copy()
-
-                item_name_col = 'Name' if 'Name' in df_combined_sku.columns else ('Name_merch' if 'Name_merch' in df_combined_sku.columns else col_sku_mod)
-
-                # 4. TOP 20 SKUS TABLE
-                st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
-                
-                sku_grp = df_combined_sku.groupby(['Clean_SKU', item_name_col]).agg({
-                    col_clicks_mod: 'sum',
-                    col_views_mod: 'sum',
-                    col_ttm_mod: 'sum'
-                }).reset_index()
-
-                sku_grp.rename(columns={
-                    'Clean_SKU': 'SKU',
-                    item_name_col: 'Product Name',
-                    col_clicks_mod: 'Item Click Total',
-                    col_views_mod: 'Item View Total',
-                    col_ttm_mod: 'TTMs Total'
-                }, inplace=True)
-
-                sku_grp['Item CTR'] = np.where(sku_grp['Item View Total'] > 0, sku_grp['Item Click Total'] / sku_grp['Item View Total'], 0.0)
-                sku_grp = sku_grp.sort_values(by='Item Click Total', ascending=False).head(20).reset_index(drop=True)
-                sku_grp.index += 1
-                sku_grp.reset_index(names='Rank', inplace=True)
-
-                st.dataframe(
-                    sku_grp[['Rank', 'SKU', 'Product Name', 'Item Click Total', 'Item View Total', 'TTMs Total', 'Item CTR']]
-                    .style.format({
-                        'Item Click Total': '{:,.0f}',
-                        'Item View Total': '{:,.0f}',
-                        'TTMs Total': '{:,.0f}',
-                        'Item CTR': '{:.2%}'
-                    }),
-                    use_container_width=True, hide_index=True
-                )
-
-                st.write("")
-
+        st.warning("⚠️ Could not locate a date column in the uploaded files. Please check that your file includes a date header (e.g., 'Daily Available From', 'Date', or 'Weekly Date').")
                 # 5. TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
                 brand_col_type = next((c for c in df_type_sub.columns if str(c).lower().strip() == 'brand'), None)
                 

@@ -1933,31 +1933,38 @@ def render_dvm_module_performance():
     # 🎯 3. MULTI-MODULE PROCESSING RULE (TOP SKUS & BRANDS PER MODULE TYPE)
     # --------------------------------------------------------------------------
     if not df_mod.empty and col_type_mod in df_mod.columns:
-        unique_types = [t for t in df_mod[col_type_mod].dropna().unique() if str(t).strip() != '']
-        
+        # Rows can list multiple Module Types as a comma-separated string
+        # (e.g. "weather-temp-above-23, weather-default"). Explode so each
+        # row's metrics count toward EVERY module type it belongs to, rather
+        # than the combo string becoming its own phantom bucket.
+        df_mod_exploded = df_mod.copy()
+        df_mod_exploded[col_type_mod] = df_mod_exploded[col_type_mod].astype(str).str.split(',')
+        df_mod_exploded = df_mod_exploded.explode(col_type_mod)
+        df_mod_exploded[col_type_mod] = df_mod_exploded[col_type_mod].str.strip()
+        df_mod_exploded = df_mod_exploded[df_mod_exploded[col_type_mod] != '']
+
+        unique_types = sorted([
+            t for t in df_mod_exploded[col_type_mod].dropna().unique()
+            if str(t).strip() != '' and str(t).strip().lower() != 'nan'
+        ])
+
         if unique_types:
             st.subheader("🎯 Performance Deep-Dive by Module Type")
-            st.caption(f"Detected **{len(unique_types)}** unique Module Type(s). Evaluating Top SKUs and Brand Momentum per format.")
+            st.caption(f"Detected **{len(unique_types)}** unique Module Type(s). Rows listing more than one Module Type are counted toward each one. Evaluating Top SKUs and Brand Momentum per format.")
 
             for m_type in unique_types:
                 st.markdown(f"### 📦 Module Format: `{m_type}`")
-                df_type_sub = df_mod[df_mod[col_type_mod] == m_type].copy()
+                df_type_sub = df_mod_exploded[df_mod_exploded[col_type_mod] == m_type].copy()
 
-                if not df_merch.empty and 'Clean_SKU' in df_type_sub.columns and 'Clean_SKU' in df_merch.columns:
-                    df_combined_sku = pd.merge(
-                        df_type_sub, 
-                        df_merch[['Clean_SKU', 'Name', 'TTMs']].drop_duplicates(subset=['Clean_SKU']),
-                        on='Clean_SKU', how='left', suffixes=('', '_merch')
-                    )
-                else:
-                    df_combined_sku = df_type_sub.copy()
-
-                item_name_col = 'Name' if 'Name' in df_combined_sku.columns else ('Name_merch' if 'Name_merch' in df_combined_sku.columns else col_sku_mod)
+                # Module reporting already carries its own Name/Brand fields —
+                # no need to merge against the hosted merch file (which is a
+                # largely different SKU universe) just to label rows.
+                item_name_col = 'Name' if 'Name' in df_type_sub.columns else col_sku_mod
 
                 # TOP 20 SKUS TABLE
                 st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
-                
-                sku_grp = df_combined_sku.groupby(['Clean_SKU', item_name_col]).agg({
+
+                sku_grp = df_type_sub.groupby(['Clean_SKU', item_name_col]).agg({
                     col_clicks_mod: 'sum',
                     col_views_mod: 'sum',
                     col_ttm_mod: 'sum'
@@ -1994,10 +2001,10 @@ def render_dvm_module_performance():
 
                 # TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
                 brand_col_type = next((c for c in df_type_sub.columns if str(c).lower().strip() == 'brand'), None)
-                
+
                 if brand_col_type and brand_col_type in df_type_sub.columns:
                     st.markdown(f"**🏷️ Top Performing Brands by Click Share (`{m_type}`)**")
-                    
+
                     brand_grp = df_type_sub.groupby(brand_col_type)[col_clicks_mod].sum().reset_index()
                     tot_type_clicks = brand_grp[col_clicks_mod].sum()
                     brand_grp['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp[col_clicks_mod] / tot_type_clicks, 0.0)

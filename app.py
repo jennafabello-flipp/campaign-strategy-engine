@@ -373,6 +373,42 @@ def render_insight_box(what, so_what, now_what):
         </div>
     """, unsafe_allow_html=True)
 
+def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False):
+    """Renders a static, slide-ready HTML table with a colored header row.
+    Use this instead of st.dataframe whenever the output needs to look good
+    dropped straight into a deck (st.dataframe's interactive grid ignores
+    header background styling)."""
+    styler = df.style.hide(axis='index')
+    if fmt:
+        styler = styler.format(fmt)
+
+    table_styles = [
+        {'selector': 'th', 'props': [
+            ('background-color', header_color),
+            ('color', header_text_color),
+            ('font-weight', '700'),
+            ('text-align', 'center'),
+            ('padding', '8px 12px'),
+            ('border', '1px solid #0d2740')
+        ]},
+        {'selector': 'td', 'props': [
+            ('padding', '6px 12px'),
+            ('text-align', 'center'),
+            ('border', '1px solid #e2e8f0')
+        ]},
+    ]
+    styler = styler.set_table_styles(table_styles)
+    styler = styler.set_table_attributes('style="width:100%; border-collapse:collapse; font-size:14px;"')
+
+    if highlight_first_row and len(df) > 0:
+        first_idx = df.index[0]
+        styler = styler.apply(
+            lambda row: ['background-color: #eef3f8; font-weight: 700;' for _ in row] if row.name == first_idx else ['' for _ in row],
+            axis=1
+        )
+
+    st.markdown(styler.to_html(), unsafe_allow_html=True)
+
 # ==============================================================================
 # 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN
 # ==============================================================================
@@ -1900,9 +1936,18 @@ def render_dvm_module_performance():
         fig_pos = px.bar(
             pos_agg, x=col_pos_mod, y=col_clicks_mod, color=col_dev_mod,
             barmode='group', title="Module Item Position Clicks by Device Type",
-            color_discrete_sequence=['#0054B7', '#43c4f4']
+            color_discrete_sequence=['#0054B7', '#43c4f4'],
+            text=col_clicks_mod
         )
-        fig_pos.update_layout(yaxis=dict(title="Item Clicks"), xaxis=dict(title="Module Item Position"), legend=dict(title="Device"))
+        fig_pos.update_traces(texttemplate='%{text:,.0f}', textposition='outside', cliponaxis=False)
+        fig_pos.update_layout(
+            yaxis=dict(title="Item Clicks", range=[0, pos_agg[col_clicks_mod].max() * 1.18]),
+            xaxis=dict(title="Module Item Position", type='category'),
+            legend=dict(title="Device"),
+            bargap=0.35,
+            bargroupgap=0.15,
+            uniformtext=dict(mode='hide', minsize=8)
+        )
         st.plotly_chart(fig_pos, use_container_width=True)
 
         st.write("---")
@@ -1941,13 +1986,13 @@ def render_dvm_module_performance():
                 # TOP 20 SKUS TABLE
                 st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
                 
-                sku_grp = df_type_sub.groupby(['Clean_SKU', item_name_col]).agg({
+                sku_grp_full = df_type_sub.groupby(['Clean_SKU', item_name_col]).agg({
                     col_clicks_mod: 'sum',
                     col_views_mod: 'sum',
                     col_ttm_mod: 'sum'
                 }).reset_index()
 
-                sku_grp.rename(columns={
+                sku_grp_full.rename(columns={
                     'Clean_SKU': 'SKU',
                     item_name_col: 'Product Name',
                     col_clicks_mod: 'Item Click Total',
@@ -1955,23 +2000,41 @@ def render_dvm_module_performance():
                     col_ttm_mod: 'TTMs Total'
                 }, inplace=True)
 
-                sku_grp['Item CTR'] = np.where(sku_grp['Item View Total'] > 0, sku_grp['Item Click Total'] / sku_grp['Item View Total'], 0.0)
-                sku_grp = sku_grp.sort_values(by='Item Click Total', ascending=False).head(20).reset_index(drop=True)
+                sku_grp_full['Item CTR'] = np.where(sku_grp_full['Item View Total'] > 0, sku_grp_full['Item Click Total'] / sku_grp_full['Item View Total'], 0.0)
+
+                # Grand Total reflects ALL SKUs under this module type, not just the top 20 shown below.
+                total_clicks = sku_grp_full['Item Click Total'].sum()
+                total_views = sku_grp_full['Item View Total'].sum()
+                total_ttms = sku_grp_full['TTMs Total'].sum()
+                grand_total_row = pd.DataFrame([{
+                    'Rank': '',
+                    'SKU': '',
+                    'Product Name': 'GRAND TOTAL',
+                    'Item Click Total': total_clicks,
+                    'Item View Total': total_views,
+                    'TTMs Total': total_ttms,
+                    'Item CTR': (total_clicks / total_views) if total_views > 0 else 0.0
+                }])
+
+                sku_grp = sku_grp_full.sort_values(by='Item Click Total', ascending=False).head(20).reset_index(drop=True)
                 sku_grp.index += 1
                 sku_grp.reset_index(names='Rank', inplace=True)
+                sku_grp['Rank'] = sku_grp['Rank'].astype(str)
+
+                sku_grp_display = pd.concat([grand_total_row, sku_grp], ignore_index=True)
 
                 safe_sheet_sku = re.sub(r'[\\/*?:\[\]]', '_', f"TopSKU_{m_type}")[:30]
-                export_sheets[safe_sheet_sku] = sku_grp
+                export_sheets[safe_sheet_sku] = sku_grp_display
 
-                st.dataframe(
-                    sku_grp[['Rank', 'SKU', 'Product Name', 'Item Click Total', 'Item View Total', 'TTMs Total', 'Item CTR']]
-                    .style.format({
+                render_presentation_table(
+                    sku_grp_display[['Rank', 'SKU', 'Product Name', 'Item Click Total', 'Item View Total', 'TTMs Total', 'Item CTR']],
+                    fmt={
                         'Item Click Total': '{:,.0f}',
                         'Item View Total': '{:,.0f}',
                         'TTMs Total': '{:,.0f}',
                         'Item CTR': '{:.2%}'
-                    }),
-                    use_container_width=True, hide_index=True
+                    },
+                    highlight_first_row=True
                 )
 
                 st.write("")
@@ -1982,22 +2045,34 @@ def render_dvm_module_performance():
                 if brand_col_type and brand_col_type in df_type_sub.columns:
                     st.markdown(f"**🏷️ Top Performing Brands by Click Share (`{m_type}`)**")
                     
-                    brand_grp = df_type_sub.groupby(brand_col_type)[col_clicks_mod].sum().reset_index()
-                    tot_type_clicks = brand_grp[col_clicks_mod].sum()
-                    brand_grp['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp[col_clicks_mod] / tot_type_clicks, 0.0)
-                    brand_grp = brand_grp.sort_values(by=col_clicks_mod, ascending=False).head(10)
+                    brand_grp_full = df_type_sub.groupby(brand_col_type)[col_clicks_mod].sum().reset_index()
+                    tot_type_clicks = brand_grp_full[col_clicks_mod].sum()
+                    brand_grp_full['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp_full[col_clicks_mod] / tot_type_clicks, 0.0)
+
+                    # Grand Total reflects ALL brands under this module type, not just the top 10 shown.
+                    grand_total_row_brand = pd.DataFrame([{
+                        brand_col_type: 'GRAND TOTAL',
+                        col_clicks_mod: tot_type_clicks,
+                        'Item Click Share %': 1.0 if tot_type_clicks > 0 else 0.0
+                    }])
+
+                    brand_grp = brand_grp_full.sort_values(by=col_clicks_mod, ascending=False).head(10).reset_index(drop=True)
+                    brand_grp_display = pd.concat([grand_total_row_brand, brand_grp], ignore_index=True)
 
                     safe_sheet_brand = re.sub(r'[\\/*?:\[\]]', '_', f"Brand_{m_type}")[:30]
-                    export_sheets[safe_sheet_brand] = brand_grp
+                    export_sheets[safe_sheet_brand] = brand_grp_display
 
                     b_c1, b_c2 = st.columns([1, 1])
                     with b_c1:
-                        st.dataframe(
-                            brand_grp.style.format({col_clicks_mod: '{:,.0f}', 'Item Click Share %': '{:.2%}'}),
-                            use_container_width=True, hide_index=True
+                        render_presentation_table(
+                            brand_grp_display[[brand_col_type, col_clicks_mod, 'Item Click Share %']],
+                            fmt={col_clicks_mod: '{:,.0f}', 'Item Click Share %': '{:.2%}'},
+                            highlight_first_row=True
                         )
 
                     with b_c2:
+                        # Chart uses the top-10-only data (excludes the Grand Total row,
+                        # which would otherwise show up as a dominant 100% bar).
                         fig_brand = px.bar(
                             brand_grp, x=brand_col_type, y='Item Click Share %',
                             title=f"Brand Share % ({m_type})",

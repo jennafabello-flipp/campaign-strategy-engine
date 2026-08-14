@@ -373,12 +373,18 @@ def render_insight_box(what, so_what, now_what):
         </div>
     """, unsafe_allow_html=True)
 
-def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False):
+def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False, hide_index=True, max_height=None):
     """Renders a static, slide-ready HTML table with a colored header row.
     Use this instead of st.dataframe whenever the output needs to look good
     dropped straight into a deck (st.dataframe's interactive grid ignores
-    header background styling)."""
-    styler = df.style.hide(axis='index')
+    header background styling).
+
+    hide_index=False keeps the row index visible (e.g. for pivot tables where
+    the index IS the meaningful row label). max_height adds a scrollable
+    container for long tables."""
+    styler = df.style
+    if hide_index:
+        styler = styler.hide(axis='index')
     if fmt:
         styler = styler.format(fmt)
 
@@ -407,7 +413,10 @@ def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_
             axis=1
         )
 
-    st.markdown(styler.to_html(), unsafe_allow_html=True)
+    html = styler.to_html()
+    if max_height:
+        html = f'<div style="max-height:{max_height}px; overflow-y:auto;">{html}</div>'
+    st.markdown(html, unsafe_allow_html=True)
 
 # ==============================================================================
 # 🗂️ MODULE 1: CAMPAIGN PERFORMANCE BREAKDOWN
@@ -686,11 +695,11 @@ def render_single_campaign_matrix():
         
         st.write("---")
         st.subheader("🏆 Top 10 Items by Total Clicks (Volume)")
-        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        render_presentation_table(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
 
         st.write("---")
         st.subheader("🎯 Top 10 Items by Item CTR (Efficiency)")
-        st.dataframe(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+        render_presentation_table(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
         
         st.write("---")
         st.subheader("📊 Item Allocation vs Click Share")
@@ -704,7 +713,7 @@ def render_single_campaign_matrix():
                 col_t1, col_c1 = st.columns(2)
                 l1_sorted = cat_l1_agg.sort_values(by='Item Click', ascending=False)
                 with col_t1: 
-                    st.dataframe(l1_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                    render_presentation_table(l1_sorted, fmt=fmt_cat)
                 with col_c1: 
                     fig_l1 = px.bar(l1_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                     fig_l1.add_scatter(x=l1_sorted['Category Name'], y=l1_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
@@ -719,7 +728,7 @@ def render_single_campaign_matrix():
                 col_t2, col_c2 = st.columns(2)
                 l2_sorted = cat_l2_agg.sort_values(by='Item Click', ascending=False)
                 with col_t2: 
-                    st.dataframe(l2_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                    render_presentation_table(l2_sorted, fmt=fmt_cat)
                 with col_c2: 
                     fig_l2 = px.bar(l2_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                     fig_l2.add_scatter(x=l2_sorted['Category Name'], y=l2_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
@@ -734,7 +743,7 @@ def render_single_campaign_matrix():
                 col_t3, col_c3 = st.columns(2)
                 l3_sorted = cat_l3_agg.sort_values(by='Item Click', ascending=False)
                 with col_t3: 
-                    st.dataframe(l3_sorted.style.format(fmt_cat), use_container_width=True, hide_index=True)
+                    render_presentation_table(l3_sorted, fmt=fmt_cat)
                 with col_c3: 
                     fig_l3 = px.bar(l3_sorted.melt(id_vars='Category Name', value_vars=['Item Allocation', 'Item Click']), x='Category Name', y='value', color='variable', barmode='group', color_discrete_sequence=['#0054B7', '#43c4f4'])
                     fig_l3.add_scatter(x=l3_sorted['Category Name'], y=l3_sorted['Add to List'], mode='lines+markers', name='Add to List', line=dict(color='#ffaf15', width=3), marker=dict(size=8))
@@ -748,24 +757,25 @@ def render_single_campaign_matrix():
         b_col, c_col = st.columns(2)
         with b_col:
             st.markdown("**Top Brand Momentum**")
-            st.dataframe(brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15).style.format({
-                'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 
-                'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
-            }), use_container_width=True, hide_index=True)
+            render_presentation_table(
+                brand_agg[['Brand', 'Unique_Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].sort_values(by='Clicks', ascending=False).head(15),
+                fmt={
+                    'Unique_Items': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}',
+                    'Click Share %': '{:.2%}', 'List Share %': '{:.2%}', 'TTM Share %': '{:.2%}'
+                }
+            )
         with c_col:
             st.markdown("**Consolidated Marketing Banners (Ranked by TTMR %)**")
             if not cr_agg.empty:
-                st.dataframe(
-                    cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']]
-                    .style.format({
-                        'Views': '{:,.0f}', 
-                        'Clicks': '{:,.0f}', 
-                        'TTMs': '{:,.0f}', 
+                render_presentation_table(
+                    cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']],
+                    fmt={
+                        'Views': '{:,.0f}',
+                        'Clicks': '{:,.0f}',
+                        'TTMs': '{:,.0f}',
                         'Asset TTMR %': '{:.2%}',
                         'Asset CTR %': '{:.2%}'
-                    }), 
-                    use_container_width=True, 
-                    hide_index=True
+                    }
                 )
 
         st.write("---")
@@ -778,18 +788,17 @@ def render_single_campaign_matrix():
         c_p, c_d = st.columns(2)
         with c_p: 
             st.markdown("**Price Band Performance**")
-            st.dataframe(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+            render_presentation_table(p_agg_sorted[['Price_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']], fmt=band_fmt)
         with c_d: 
             st.markdown("**Discount Band Performance**")
-            st.dataframe(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt), use_container_width=True, hide_index=True)
+            render_presentation_table(d_agg_sorted[['Discount_Tier', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']], fmt=band_fmt)
             
         if col_sale_story and not s_agg_sorted.empty:
             st.write("")
             st.markdown(f"**🏷️ Sale Story & Promotional Hook Performance** *(Mapped via `{col_sale_story}`)*")
-            st.dataframe(
-                s_agg_sorted[['Sale Story Callout', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']].style.format(band_fmt),
-                use_container_width=True,
-                hide_index=True
+            render_presentation_table(
+                s_agg_sorted[['Sale Story Callout', 'Items', 'Clicks', 'Click Share %', 'Clips', 'List Share %', 'TTMs', 'TTM Share %']],
+                fmt=band_fmt
             )
 
         st.write("")
@@ -847,13 +856,13 @@ def render_single_campaign_matrix():
                     if top_list_tier:
                         st.success(f"📋 **Top Add-to-List Tier: {top_list_tier}**")
                         top_list_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_list_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'Clips': 'sum'}).reset_index().sort_values('Clips', ascending=False).head(3)
-                        st.dataframe(top_list_items[['SKU', 'Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'Clips': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(top_list_items[['SKU', 'Name', 'Curr_Price', 'Clips']].rename(columns={'Curr_Price': 'Price'}), fmt={'Price': '${:.2f}', 'Clips': '{:,.0f}'})
                         
                 with col_tt:
                     if top_ttm_tier:
                         st.info(f"🛒 **Top Click-to-Buy (TTM) Tier: {top_ttm_tier}**")
                         top_ttm_items = df_prod_bands[df_prod_bands['Price_Tier'] == top_ttm_tier].groupby('SKU').agg({'Name': 'first', 'Curr_Price': 'first', 'TTMs': 'sum'}).reset_index().sort_values('TTMs', ascending=False).head(3)
-                        st.dataframe(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}).style.format({'Price': '${:.2f}', 'TTMs': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(top_ttm_items[['SKU', 'Name', 'Curr_Price', 'TTMs']].rename(columns={'Curr_Price': 'Price'}), fmt={'Price': '${:.2f}', 'TTMs': '{:,.0f}'})
 
     if scroll_file and not df_sc_table.empty:
         st.write("---")
@@ -879,7 +888,7 @@ def render_single_campaign_matrix():
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:
             st.markdown("**Global Average Retention**")
-            st.dataframe(df_sc_table[['Scroll Depth', '% of Users Read', 'Approx Page']].style.format({'% of Users Read': '{:.1%}'}), use_container_width=True, hide_index=True)
+            render_presentation_table(df_sc_table[['Scroll Depth', '% of Users Read', 'Approx Page']], fmt={'% of Users Read': '{:.1%}'})
         with sc_col2:
             if weekly_scroll is not None and not weekly_scroll.empty:
                 fig = px.line(weekly_scroll, x='Milestone', y='Retention', color='Campaign/Week', markers=True, title="Variance by Campaign/Week")
@@ -1034,7 +1043,7 @@ def render_head_to_head_variance():
             }
             df_funnel_summary = pd.DataFrame(funnel_data)
             export_sheets["Funnel_Macro"] = df_funnel_summary
-            st.dataframe(df_funnel_summary, use_container_width=True, hide_index=True)
+            render_presentation_table(df_funnel_summary)
 
         # 2. MERCHANDISE ANALYSIS
         if not df_base.empty and not df_new.empty:
@@ -1113,7 +1122,7 @@ def render_head_to_head_variance():
 
                 df_summary = pd.DataFrame(summary_data)
                 export_sheets["Merch_Macro"] = df_summary
-                st.dataframe(df_summary, use_container_width=True, hide_index=True)
+                render_presentation_table(df_summary)
 
             if 'Page Position' in df_base.columns and 'Page Position' in df_new.columns:
                 st.write("---")
@@ -1135,12 +1144,12 @@ def render_head_to_head_variance():
                 merged_page = merged_page.sort_values(by='Page_Num').drop(columns=['Page_Num'])
 
                 export_sheets["Page_Engagement"] = merged_page
-                st.dataframe(
-                    merged_page.style.format({
+                render_presentation_table(
+                    merged_page,
+                    fmt={
                         'Base Views': '{:,.0f}', 'Base Clicks': '{:,.0f}', 'Base CTR %': '{:.2%}',
                         'New Views': '{:,.0f}', 'New Clicks': '{:,.0f}', 'New CTR %': '{:.2%}'
-                    }),
-                    use_container_width=True, hide_index=True
+                    }
                 )
 
             def filter_assets(df):
@@ -1183,10 +1192,10 @@ def render_head_to_head_variance():
                     c7, c8 = st.columns(2)
                     with c7:
                         st.markdown("**Historical Top TTMR % (Base)**")
-                        st.dataframe(base_top_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(base_top_ttmr, fmt={'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'})
                     with c8:
                         st.markdown("**Current Top TTMR % (New)**")
-                        st.dataframe(new_top_ttmr.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(new_top_ttmr, fmt={'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'})
 
                     st.write("---")
                     st.subheader("📢 Top-10 Marketing Assets by Total TTMs")
@@ -1203,10 +1212,10 @@ def render_head_to_head_variance():
                     c9, c10 = st.columns(2)
                     with c9:
                         st.markdown("**Historical Top TTM Volume (Base)**")
-                        st.dataframe(base_top_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(base_top_ttms, fmt={'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'})
                     with c10:
                         st.markdown("**Current Top TTM Volume (New)**")
-                        st.dataframe(new_top_ttms.style.format({'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(new_top_ttms, fmt={'TTMs': '{:,.0f}', 'TTMR %': '{:.2%}'})
 
         if export_sheets:
             st.write("---")
@@ -1655,7 +1664,7 @@ def render_taylors_workspace():
         st.markdown("**🔍 Category Mapping Audit**")
         st.info("Cross-reference products against their newly assigned engine categories.")
         audit_df = df_prod[['Clean_Name', 'cat_m']].drop_duplicates().sort_values(by='Clean_Name').rename(columns={'Clean_Name': 'Name', 'cat_m': 'Assigned Category'}).reset_index(drop=True)
-        st.dataframe(audit_df, use_container_width=True, hide_index=True, height=400)
+        render_presentation_table(audit_df, max_height=400)
 
     st.write("---")
 
@@ -1667,14 +1676,14 @@ def render_taylors_workspace():
     st.subheader("🏆 Top 10 Items - Shopper Interest by Item CTR")
     top_10_ctr = top_items.sort_values(by='Item CTR', ascending=False).head(10)
     st.metric(label="Avg. Item CTR (Global Campaign Baseline)", value=f"{global_avg_ctr:.2%}")
-    st.dataframe(top_10_ctr[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    render_presentation_table(top_10_ctr[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']], fmt={'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'})
 
     st.write("---")
 
     st.subheader("🏆 Top 10 Items - Shopper Interest by Clicks")
     top_10_clicks = top_items.sort_values(by='Clicks', ascending=False).head(10)
     st.metric(label="Avg. Item Clicks (Global Campaign Baseline)", value=f"{global_avg_clicks:,.0f}")
-    st.dataframe(top_10_clicks[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']].style.format({'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+    render_presentation_table(top_10_clicks[['Product Name', 'Category', 'Price', 'Views', 'Clicks', 'Item CTR']], fmt={'Price': '${:.2f}', 'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'})
 
     st.write("---")
 
@@ -1685,7 +1694,7 @@ def render_taylors_workspace():
 
         with col_tbl:
             st.markdown("<br>", unsafe_allow_html=True) 
-            st.dataframe(pivot_reg.style.format('{:.2%}'), use_container_width=True)
+            render_presentation_table(pivot_reg, fmt='{:.2%}', hide_index=False)
 
         with col_chart:
             max_reg_ctr = reg_cat_agg['CTR'].max()
@@ -1723,7 +1732,7 @@ def render_taylors_workspace():
                         reg_items['Item CTR'] = np.where(reg_items['Views'] > 0, reg_items['Clicks'] / reg_items['Views'], 0)
                         reg_items = reg_items.sort_values(by=['Item CTR', 'Clicks'], ascending=[False, False]).head(5)
                         
-                        st.dataframe(reg_items.style.format({'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+                        render_presentation_table(reg_items, fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Item CTR': '{:.2%}'})
             else:
                 st.info(f"No localized regional items captured for {run}.")
                 
@@ -1751,11 +1760,11 @@ def render_taylors_workspace():
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**🔥 Top 10 by Total Clicks**")
-                st.dataframe(top_10_clicks.style.format({'Total Clicks': '{:,.0f}'}), use_container_width=True, hide_index=True)
+                render_presentation_table(top_10_clicks, fmt={'Total Clicks': '{:,.0f}'})
                 
             with col2:
                 st.markdown("**🎯 Top 10 by Item CTR**")
-                st.dataframe(top_10_ctr.style.format({'Item CTR': '{:.2%}'}), use_container_width=True, hide_index=True)
+                render_presentation_table(top_10_ctr, fmt={'Item CTR': '{:.2%}'})
                 
             st.divider()
 
@@ -1879,10 +1888,7 @@ def render_dvm_module_performance():
         c_map1, c_map2 = st.columns([1, 2])
         with c_map1:
             st.markdown(f"**{'Provincial' if is_canada_data else 'State'} Breakdown**")
-            st.dataframe(
-                prov_export.style.format({'Item Clicks': '{:,.0f}', 'Click Share %': '{:.2%}'}),
-                use_container_width=True, hide_index=True
-            )
+            render_presentation_table(prov_export, fmt={'Item Clicks': '{:,.0f}', 'Click Share %': '{:.2%}'})
 
         with c_map2:
             if is_canada_data:

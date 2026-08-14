@@ -37,7 +37,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# 🧹 ARMORED AUTO-SCRUBBER ENGINE (MULTIPLE KEYWORD CONSENSUS)
+# 🧹 ARMORED AUTO-SCRUBBER ENGINE
 # ==============================================================================
 def clean_bilingual_suffix(name_str):
     if pd.isna(name_str): return "Unnamed Asset"
@@ -1728,22 +1728,17 @@ def render_taylors_workspace():
 # ==============================================================================
 def render_dvm_module_performance():
     st.markdown("<div class='main-header'>📱 Module 5: DVM Module Performance</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Upload Hosted Module Reporting and Hosted Merchandise Metrics to analyze provincial engagement, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Upload Hosted Module Reporting to analyze provincial engagement, device breakdown, and SKU/Brand momentum per module type.</div>", unsafe_allow_html=True)
 
     dl_placeholder = st.empty()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        module_file = st.file_uploader("1️⃣ Upload Hosted Module Reporting (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_module")
-    with col2:
-        merch_file = st.file_uploader("2️⃣ Upload Hosted Merchandise Metrics (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_merch")
+    module_file = st.file_uploader("Upload Hosted Module Reporting (.xlsx/.csv)", type=["xlsx", "csv"], key="dvm_module")
 
-    if not module_file and not merch_file:
-        st.info("⚠️ **Awaiting Data:** Please upload Hosted Module Reporting, Hosted Merchandise Metrics, or both to run the analysis.")
+    if not module_file:
+        st.info("⚠️ **Awaiting Data:** Please upload Hosted Module Reporting to run the analysis.")
         return
 
     df_mod = pd.DataFrame()
-    df_merch = pd.DataFrame()
     export_sheets = {}
 
     if module_file:
@@ -1769,29 +1764,12 @@ def render_dvm_module_performance():
             else:
                 df_mod['Clean_SKU'] = 'UNKNOWN'
 
-    if merch_file:
-        df_merch_raw, m_merch, _ = scrub_and_load_excel(merch_file)
-        if df_merch_raw is not None and not df_merch_raw.empty:
-            chan_col = next((c for c in df_merch_raw.columns if str(c).lower().strip() in ['channel', 'display type', 'display_type']), None)
-            if chan_col:
-                is_hosted = df_merch_raw[chan_col].astype(str).str.contains('hosted', case=False, na=False)
-                if is_hosted.any():
-                    df_merch_raw = df_merch_raw[is_hosted].copy()
-
-            df_merch, _, _ = process_metrics(df_merch_raw, m_merch)
-            if 'SKU' in df_merch.columns:
-                df_merch['Clean_SKU'] = df_merch['SKU'].astype(str).str.strip().str.replace('.0', '', regex=False).str.upper()
-            else:
-                df_merch['Clean_SKU'] = 'UNKNOWN'
-
     # --------------------------------------------------------------------------
     # 📌 FLIGHT INFORMATION RECAP BANNER (MODULE TYPE & FLYER RUN IDS FROM MODULE DATA)
     # --------------------------------------------------------------------------
     st.write("---")
     
-    def extract_module_header_metadata(df_m, df_m_raw):
-        target_df = df_m if not df_m.empty else df_m_raw
-        
+    def extract_module_header_metadata(target_df):
         # 1. Merchant Name
         merchant = target_df['Merchant Name'].dropna().unique()[0] if 'Merchant Name' in target_df.columns and len(target_df['Merchant Name'].dropna()) > 0 else "Home Depot Canada"
         
@@ -1822,7 +1800,7 @@ def render_dvm_module_performance():
             
         return merchant, run_name, run_id, date_from, date_to
 
-    merchant, run_name, run_id, date_from, date_to = extract_module_header_metadata(df_mod, df_merch)
+    merchant, run_name, run_id, date_from, date_to = extract_module_header_metadata(df_mod)
     
     info_c1, info_c2 = st.columns(2)
     with info_c1:
@@ -1845,7 +1823,7 @@ def render_dvm_module_performance():
             'AB': 'Alberta', 'MB': 'Manitoba', 'NS': 'Nova Scotia',
             'NB': 'New Brunswick', 'SK': 'Saskatchewan', 
             'NL': 'Newfoundland and Labrador', 'PE': 'Prince Edward Island',
-            'NT': 'Northwest Territories', 'YT': 'Yukon', 'NU': 'Nunavut'
+            'NT': 'Northwest Territories', 'YT': 'Yukon Territory', 'NU': 'Nunavut'
         }
 
         prov_agg = df_mod.groupby(col_prov_mod)[col_clicks_mod].sum().reset_index()
@@ -1957,13 +1935,12 @@ def render_dvm_module_performance():
                 df_type_sub = df_mod_exploded[df_mod_exploded[col_type_mod] == m_type].copy()
 
                 # Module reporting already carries its own Name/Brand fields —
-                # no need to merge against the hosted merch file (which is a
-                # largely different SKU universe) just to label rows.
+                # no external merge needed to label rows.
                 item_name_col = 'Name' if 'Name' in df_type_sub.columns else col_sku_mod
 
                 # TOP 20 SKUS TABLE
                 st.markdown(f"**🏆 Top 20 SKUs by Item Click Volume (`{m_type}`)**")
-
+                
                 sku_grp = df_type_sub.groupby(['Clean_SKU', item_name_col]).agg({
                     col_clicks_mod: 'sum',
                     col_views_mod: 'sum',
@@ -2001,10 +1978,10 @@ def render_dvm_module_performance():
 
                 # TOP PERFORMING BRAND BY ITEM CLICK PERCENTAGE
                 brand_col_type = next((c for c in df_type_sub.columns if str(c).lower().strip() == 'brand'), None)
-
+                
                 if brand_col_type and brand_col_type in df_type_sub.columns:
                     st.markdown(f"**🏷️ Top Performing Brands by Click Share (`{m_type}`)**")
-
+                    
                     brand_grp = df_type_sub.groupby(brand_col_type)[col_clicks_mod].sum().reset_index()
                     tot_type_clicks = brand_grp[col_clicks_mod].sum()
                     brand_grp['Item Click Share %'] = np.where(tot_type_clicks > 0, brand_grp[col_clicks_mod] / tot_type_clicks, 0.0)

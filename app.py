@@ -2106,6 +2106,195 @@ def render_dvm_module_performance():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
+# ==============================================================================
+# 📣 MODULE 6: SOCIAL CAMPAIGN PERFORMANCE (META) — PHASE 1: FORMAT EFFICIENCY
+# ==============================================================================
+def parse_meta_ou_report(file_obj):
+    """Parses the Meta Carousel/Feed/Story weekly 'Offers Unlimited'-style report.
+    The file stacks multiple sections (Overall campaign, then one block per
+    region) inside the same columns at each week's sheet, rather than being a
+    single flat table. This scans for section-title rows (non-null col A,
+    null col B) and reads each block until its rows run out.
+
+    Returns a list of dicts: {'week_label', 'overall' (DataFrame), 'regional'
+    (dict of region name -> DataFrame)}. Regional blocks are captured now so
+    Phase 2 (regional cuts) doesn't need to re-parse the file."""
+    file_bytes = file_obj.read()
+    xls = pd.ExcelFile(io.BytesIO(file_bytes))
+    weekly_records = []
+    seen_titles = set()
+
+    for sheet_name in xls.sheet_names:
+        raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+        if raw.empty or raw.shape[0] < 5 or raw.shape[1] < 2:
+            continue
+
+        title_cell = str(raw.iloc[0, 0]).strip() if pd.notna(raw.iloc[0, 0]) else ""
+        if not title_cell.lower().startswith("overall campaign"):
+            continue
+        if title_cell in seen_titles:
+            continue  # skips duplicate/stray sheets (e.g. a leftover tab mirroring an earlier week)
+        seen_titles.add(title_cell)
+
+        week_label = re.sub(r'(?i)^overall campaign\s*-\s*', '', title_cell).strip()
+
+        section_starts = []
+        for i in range(len(raw)):
+            v0, v1 = raw.iloc[i, 0], raw.iloc[i, 1]
+            if pd.notna(v0) and pd.isna(v1):
+                v0s = str(v0).strip()
+                if v0s and v0s.lower() != 'title' and not v0s.lower().startswith('comparison'):
+                    section_starts.append((i, v0s))
+
+        overall_df, regional = None, {}
+        for start_row, label in section_starts:
+            header_row = start_row + 1
+            if header_row >= len(raw) or str(raw.iloc[header_row, 1]).strip() != 'Network-Format':
+                continue
+            col_names = [str(c).strip() for c in raw.iloc[header_row].tolist()]
+            data_rows, r = [], header_row + 1
+            while r < len(raw) and pd.notna(raw.iloc[r, 1]):
+                data_rows.append(raw.iloc[r].tolist())
+                r += 1
+            block_df = pd.DataFrame(data_rows, columns=col_names)
+
+            if label.lower().startswith('overall campaign'):
+                overall_df = block_df
+            else:
+                region_name = label.split(' - ')[0].strip()
+                regional[region_name] = block_df
+
+        weekly_records.append({'week_label': week_label, 'overall': overall_df, 'regional': regional})
+
+    return weekly_records
+
+def render_social_format_efficiency():
+    st.markdown("<div class='main-header'>📣 Module 6: Social Campaign Performance (Meta)</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Phase 1 — Format Spend Efficiency across Carousel, Feed, and Story. Upload the weekly performance report (one file, one sheet per week).</div>", unsafe_allow_html=True)
+
+    dl_placeholder = st.empty()
+    social_files = st.file_uploader("Upload Meta Weekly Performance Report(s) (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="m6_meta")
+
+    if not social_files:
+        st.info("⚠️ **Awaiting Data:** Please upload the Meta weekly performance report to run the analysis.")
+        return
+
+    export_sheets = {}
+    all_weeks = []
+    for f in social_files:
+        all_weeks.extend(parse_meta_ou_report(f))
+
+    if not all_weeks:
+        st.error("⚠️ Could not find any recognizable 'Overall campaign' weekly sections in the uploaded file(s). This module expects the Meta Carousel/Feed/Story weekly report format.")
+        return
+
+    trend_rows = []
+    for wk in all_weeks:
+        df = wk['overall']
+        if df is None or df.empty or 'Network-Format' not in df.columns:
+            continue
+        df = df[df['Network-Format'].astype(str).str.strip() != 'Totals'].copy()
+        for c in ['Total Impressions', 'Total Engagements', 'Total Clickouts', 'Spent']:
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+
+        for _, row in df.iterrows():
+            spend = row.get('Spent', 0) or 0
+            impressions = row.get('Total Impressions', 0) or 0
+            clicks = row.get('Total Clickouts', 0) or 0
+            engagements = row.get('Total Engagements', 0) or 0
+            trend_rows.append({
+                'Week': wk['week_label'],
+                'Format': row.get('Network-Format', 'Unknown'),
+                'Spend': spend,
+                'Impressions': impressions,
+                'Clickouts': clicks,
+                'Engagements': engagements,
+                'Engagement Definition': row.get('Engagement defination', 'N/A'),
+                'CPM': (spend / impressions * 1000) if impressions else 0.0,
+                'CTR': (clicks / impressions) if impressions else 0.0,
+                'Cost per Click': (spend / clicks) if clicks else 0.0,
+                'Engagement Rate': (engagements / impressions) if impressions else 0.0,
+                'Cost per Engagement': (spend / engagements) if engagements else 0.0,
+            })
+
+    trend_df = pd.DataFrame(trend_rows)
+    if trend_df.empty:
+        st.error("⚠️ Parsed the file(s) but found no usable format-level rows inside the 'Overall campaign' sections.")
+        return
+
+    export_sheets['Weekly_Format_Trend'] = trend_df
+
+    # --------------------------------------------------------------------------
+    # TIER 1 — Platform-comparable metrics (safe to compare across formats)
+    # --------------------------------------------------------------------------
+    st.subheader("📊 Tier 1 — Platform-Comparable Metrics")
+    st.caption("Spend, reach, and click cost mean the same thing regardless of format — safe to compare Carousel vs. Feed vs. Story directly on these.")
+
+    tier1_cols = ['Week', 'Format', 'Spend', 'Impressions', 'CPM', 'Clickouts', 'CTR', 'Cost per Click']
+    render_presentation_table(
+        trend_df[tier1_cols],
+        fmt={'Spend': '${:,.0f}', 'Impressions': '{:,.0f}', 'CPM': '${:,.2f}', 'Clickouts': '{:,.0f}', 'CTR': '{:.2%}', 'Cost per Click': '${:,.2f}'}
+    )
+
+    fig_cpc = px.line(
+        trend_df, x='Week', y='Cost per Click', color='Format', markers=True,
+        title="Cost per Click by Format, Over Time",
+        color_discrete_sequence=['#0054B7', '#43c4f4', '#ffaf15']
+    )
+    fig_cpc.update_traces(texttemplate='$%{y:,.2f}', textposition='top center')
+    fig_cpc.update_layout(yaxis=dict(title="Cost per Click", tickprefix='$'), xaxis=dict(title=None))
+    st.plotly_chart(fig_cpc, use_container_width=True)
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # TIER 2 — Format-native metrics (NOT comparable across formats)
+    # --------------------------------------------------------------------------
+    st.subheader("🎯 Tier 2 — Format-Native Engagement Metrics")
+    st.warning("⚠️ **Do not compare Engagement Rate or Cost per Engagement ACROSS formats.** Meta defines \"engagement\" differently per format — check the definition shown under each table below. These numbers are only meaningful trended within the SAME format over time, not against a different format.")
+
+    for fmt in trend_df['Format'].unique():
+        fmt_df = trend_df[trend_df['Format'] == fmt][['Week', 'Engagement Definition', 'Engagements', 'Engagement Rate', 'Cost per Engagement']]
+        eng_def_label = fmt_df['Engagement Definition'].iloc[0] if not fmt_df.empty else "N/A"
+        st.markdown(f"**{fmt}** — *Engagement = \"{eng_def_label}\"*")
+        render_presentation_table(
+            fmt_df.drop(columns=['Engagement Definition']),
+            fmt={'Engagements': '{:,.0f}', 'Engagement Rate': '{:.2%}', 'Cost per Engagement': '${:,.2f}'}
+        )
+        export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Engagement_{fmt}")[:30]] = fmt_df
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # INSIGHT BOX
+    # --------------------------------------------------------------------------
+    avg_cpc = trend_df.groupby('Format')['Cost per Click'].mean().sort_values()
+    if len(avg_cpc) >= 2:
+        best_format, best_cpc = avg_cpc.index[0], avg_cpc.iloc[0]
+        worst_format, worst_cpc = avg_cpc.index[-1], avg_cpc.iloc[-1]
+        multiple = (worst_cpc / best_cpc) if best_cpc > 0 else 0
+
+        render_insight_box(
+            what=f"Across the {trend_df['Week'].nunique()} week(s) analyzed, <b>{best_format}</b> delivered the lowest average Cost per Click at <b>${best_cpc:,.2f}</b>, versus <b>{worst_format}</b> at <b>${worst_cpc:,.2f}</b> — a <b>{multiple:.1f}x</b> difference.",
+            so_what=f"Engagement Rate alone looks similar across formats, but that's an artifact of Meta defining \"engagement\" differently per format (see Tier 2). Cost per Click is defined identically everywhere, and it shows {best_format} converting spend into actual site traffic far more efficiently than {worst_format}.",
+            now_what=f"If the objective is driving traffic, shift incremental budget toward {best_format}. If {worst_format} is intentionally being used for reach or video completion rather than clicks, that's a valid reason to keep its spend — just don't justify it by comparing its Engagement Rate to {best_format}'s."
+        )
+
+    if export_sheets:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, df_sheet in export_sheets.items():
+                df_sheet.to_excel(writer, sheet_name=str(sheet_name)[:31], index=False)
+        output.seek(0)
+
+        dl_placeholder.download_button(
+            label="⬇️ Download Social Format Efficiency Report (.xlsx)",
+            data=output,
+            file_name="Social_Format_Efficiency_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU
 # ---------------------------------------------------------
@@ -2116,7 +2305,8 @@ pipeline_mode = st.sidebar.radio(
         "⚖️ Module 2: Head-to-Head Comparison", 
         "🏆 Module 3: Industry Benchmarks", 
         "🛒 Module 4: Taylor's Workspace",
-        "📱 Module 5: DVM Module Performance"
+        "📱 Module 5: DVM Module Performance",
+        "📣 Module 6: Social Campaign Performance"
     ]
 )
 
@@ -2133,3 +2323,5 @@ elif "Taylor" in pipeline_mode or "Module 4" in pipeline_mode:
     render_taylors_workspace()
 elif "DVM Module" in pipeline_mode or "Module 5" in pipeline_mode:
     render_dvm_module_performance()
+elif "Social Campaign" in pipeline_mode or "Module 6" in pipeline_mode:
+    render_social_format_efficiency()

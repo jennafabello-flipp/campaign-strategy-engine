@@ -2281,6 +2281,71 @@ def render_social_format_efficiency():
             now_what=f"If the objective is driving traffic, shift incremental budget toward {best_format}. If {worst_format} is intentionally being used for reach or video completion rather than clicks, that's a valid reason to keep its spend — just don't justify it by comparing its Engagement Rate to {best_format}'s."
         )
 
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # REGIONAL EFFICIENCY — aggregated across formats, per market
+    # --------------------------------------------------------------------------
+    st.subheader("🗺️ Regional Efficiency")
+    st.caption("Aggregated across all formats per market. Only comparable metrics (Spend, Impressions, CPM, Clickouts, CTR, Cost per Click) are shown — blending Engagement Rate across formats within a region would compound the same definition-mixing problem flagged in Tier 2, so it's intentionally left out here.")
+
+    regional_rows = []
+    for wk in all_weeks:
+        for region_name, region_df in wk['regional'].items():
+            if region_df is None or region_df.empty or 'Network-Format' not in region_df.columns:
+                continue
+            rdf = region_df[region_df['Network-Format'].astype(str).str.strip() != 'Totals'].copy()
+            for c in ['Total Impressions', 'Total Clickouts', 'Spent']:
+                if c in rdf.columns:
+                    rdf[c] = pd.to_numeric(rdf[c], errors='coerce').fillna(0)
+                else:
+                    rdf[c] = 0
+
+            spend = rdf['Spent'].sum()
+            impressions = rdf['Total Impressions'].sum()
+            clicks = rdf['Total Clickouts'].sum()
+            regional_rows.append({
+                'Week': wk['week_label'],
+                'Region': region_name,
+                'Spend': spend,
+                'Impressions': impressions,
+                'Clickouts': clicks,
+                'CPM': (spend / impressions * 1000) if impressions else 0.0,
+                'CTR': (clicks / impressions) if impressions else 0.0,
+                'Cost per Click': (spend / clicks) if clicks else 0.0,
+            })
+
+    regional_df = pd.DataFrame(regional_rows)
+    if regional_df.empty:
+        st.info("No regional breakdown sections were found in the uploaded file(s).")
+    else:
+        export_sheets['Regional_Trend'] = regional_df
+
+        render_presentation_table(
+            regional_df[['Week', 'Region', 'Spend', 'Impressions', 'CPM', 'Clickouts', 'CTR', 'Cost per Click']],
+            fmt={'Spend': '${:,.0f}', 'Impressions': '{:,.0f}', 'CPM': '${:,.2f}', 'Clickouts': '{:,.0f}', 'CTR': '{:.2%}', 'Cost per Click': '${:,.2f}'}
+        )
+
+        fig_region = px.line(
+            regional_df, x='Week', y='Cost per Click', color='Region', markers=True,
+            title="Cost per Click by Region, Over Time",
+            color_discrete_sequence=['#00b050', '#0054B7', '#ffaf15']
+        )
+        fig_region.update_layout(yaxis=dict(title="Cost per Click", tickprefix='$'), xaxis=dict(title=None))
+        st.plotly_chart(fig_region, use_container_width=True)
+
+        avg_cpc_region = regional_df.groupby('Region')['Cost per Click'].mean().sort_values()
+        if len(avg_cpc_region) >= 2:
+            best_region, best_r_cpc = avg_cpc_region.index[0], avg_cpc_region.iloc[0]
+            worst_region, worst_r_cpc = avg_cpc_region.index[-1], avg_cpc_region.iloc[-1]
+            r_multiple = (worst_r_cpc / best_r_cpc) if best_r_cpc > 0 else 0
+
+            render_insight_box(
+                what=f"Across the {regional_df['Week'].nunique()} week(s) analyzed, <b>{best_region}</b> had the lowest average Cost per Click at <b>${best_r_cpc:,.2f}</b>, versus <b>{worst_region}</b> at <b>${worst_r_cpc:,.2f}</b> — a <b>{r_multiple:.1f}x</b> difference.",
+                so_what=f"This is aggregated across all formats, so it isn't a definition-mixing artifact like the Tier 2 trap — it reflects how efficiently spend in {worst_region} actually converted into clicks compared to {best_region}, regardless of format mix.",
+                now_what=f"Before shifting budget, check whether {worst_region}'s format mix, targeting, or local competitive conditions differ from {best_region}. A market with a higher Cost per Click but strong in-store or offline results may still be worth the spend — this metric flags where to investigate, not a verdict on its own."
+            )
+
     if export_sheets:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:

@@ -373,6 +373,19 @@ def render_insight_box(what, so_what, now_what):
         </div>
     """, unsafe_allow_html=True)
 
+def render_consolidated_insight_box(title, items):
+    """Renders one insight-box containing several condensed, one-line-per-topic
+    takeaways. Used for a top-of-page executive rollup that consolidates
+    multiple section-level insight boxes into a single scannable summary.
+    items: list of (label, text) tuples."""
+    bullets_html = "".join(f'<div class="insight-text"><b>{label}:</b> {text}</div>' for label, text in items)
+    st.markdown(f"""
+        <div class="insight-box">
+            <div class="insight-title">{title}</div>
+            {bullets_html}
+        </div>
+    """, unsafe_allow_html=True)
+
 def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False, hide_index=True, max_height=None):
     """Renders a static, slide-ready HTML table with a colored header row.
     Use this instead of st.dataframe whenever the output needs to look good
@@ -2247,6 +2260,118 @@ def render_social_format_efficiency():
     export_sheets['Weekly_Format_Trend'] = trend_df
 
     # --------------------------------------------------------------------------
+    # PRE-COMPUTE all data + insights up front, so the consolidated summary at
+    # the top and each detailed section below can both draw on the same numbers
+    # without re-deriving them.
+    # --------------------------------------------------------------------------
+    avg_cpc = trend_df.groupby('Format')['Cost per Click'].mean().sort_values()
+    format_insight = None
+    if len(avg_cpc) >= 2:
+        best_format, best_cpc = avg_cpc.index[0], avg_cpc.iloc[0]
+        worst_format, worst_cpc = avg_cpc.index[-1], avg_cpc.iloc[-1]
+        multiple = (worst_cpc / best_cpc) if best_cpc > 0 else 0
+        format_insight = {'best_format': best_format, 'best_cpc': best_cpc, 'worst_format': worst_format, 'worst_cpc': worst_cpc, 'multiple': multiple}
+
+    regional_rows = []
+    for wk in all_weeks:
+        for region_name, region_df in wk['regional'].items():
+            if region_df is None or region_df.empty or 'Network-Format' not in region_df.columns:
+                continue
+            rdf = region_df[region_df['Network-Format'].astype(str).str.strip() != 'Totals'].copy()
+            for c in ['Total Impressions', 'Total Clickouts', 'Spent']:
+                if c in rdf.columns:
+                    rdf[c] = pd.to_numeric(rdf[c], errors='coerce').fillna(0)
+                else:
+                    rdf[c] = 0
+            spend = rdf['Spent'].sum()
+            impressions = rdf['Total Impressions'].sum()
+            clicks = rdf['Total Clickouts'].sum()
+            regional_rows.append({
+                'Week': wk['week_label'], 'Region': region_name, 'Spend': spend, 'Impressions': impressions,
+                'Clickouts': clicks, 'CPM': (spend / impressions * 1000) if impressions else 0.0,
+                'CTR': (clicks / impressions) if impressions else 0.0, 'Cost per Click': (spend / clicks) if clicks else 0.0,
+            })
+    regional_df = pd.DataFrame(regional_rows)
+
+    regional_insight = None
+    if not regional_df.empty:
+        avg_cpc_region = regional_df.groupby('Region')['Cost per Click'].mean().sort_values()
+        if len(avg_cpc_region) >= 2:
+            best_region, best_r_cpc = avg_cpc_region.index[0], avg_cpc_region.iloc[0]
+            worst_region, worst_r_cpc = avg_cpc_region.index[-1], avg_cpc_region.iloc[-1]
+            r_multiple = (worst_r_cpc / best_r_cpc) if best_r_cpc > 0 else 0
+            regional_insight = {'best_region': best_region, 'best_r_cpc': best_r_cpc, 'worst_region': worst_region, 'worst_r_cpc': worst_r_cpc, 'r_multiple': r_multiple}
+
+    demo_rows = []
+    for wk in all_weeks:
+        for fmt, blocks in wk.get('demographics', {}).items():
+            age_df, gender_df = blocks.get('age'), blocks.get('gender')
+            female_share = None
+            if gender_df is not None and not gender_df.empty:
+                f_row = gender_df[gender_df['Gender'].str.strip().str.lower() == 'female']
+                female_share = f_row['Share'].iloc[0] if not f_row.empty else None
+            share_65_plus = None
+            if age_df is not None and not age_df.empty:
+                o_row = age_df[age_df['Age Group'].str.strip() == '65+']
+                share_65_plus = o_row['Share'].iloc[0] if not o_row.empty else None
+            demo_rows.append({'Week': wk['week_label'], 'Format': fmt, 'Female Share': female_share, '65+ Share': share_65_plus})
+    demo_trend_df = pd.DataFrame(demo_rows)
+
+    # NOTE: rows are already in chronological order (built by iterating all_weeks in file
+    # order) — do NOT sort by the 'Week' label, since strings like "June 2 - 8" vs.
+    # "June 15 - 22" sort alphabetically, not chronologically, and would scramble the sequence.
+    biggest_swing = {'magnitude': 0}
+    if not demo_trend_df.empty:
+        for metric in ['Female Share', '65+ Share']:
+            for fmt in demo_trend_df['Format'].unique():
+                series = demo_trend_df[demo_trend_df['Format'] == fmt][metric].reset_index(drop=True)
+                weeks_seq = demo_trend_df[demo_trend_df['Format'] == fmt]['Week'].reset_index(drop=True)
+                if len(series) < 2:
+                    continue
+                diffs = series.diff().abs()
+                if diffs.max() > biggest_swing['magnitude']:
+                    swing_idx = diffs.idxmax()
+                    biggest_swing = {
+                        'magnitude': diffs.max(), 'metric': metric, 'format': fmt,
+                        'from_val': series.iloc[swing_idx - 1], 'to_val': series.iloc[swing_idx],
+                        'week': weeks_seq.iloc[swing_idx]
+                    }
+
+    # --------------------------------------------------------------------------
+    # CAMPAIGN LEARNINGS & TAKEAWAYS — consolidated rollup of every section's insight
+    # --------------------------------------------------------------------------
+    takeaway_items = []
+    if format_insight:
+        fi = format_insight
+        takeaway_items.append((
+            "Format Efficiency",
+            f"<b>{fi['best_format']}</b> converted spend into clicks far more efficiently than <b>{fi['worst_format']}</b> "
+            f"(${fi['best_cpc']:,.2f} vs ${fi['worst_cpc']:,.2f} Cost per Click — a {fi['multiple']:.1f}x gap). "
+            f"Don't judge this by Engagement Rate alone — Meta defines \"engagement\" differently per format. "
+            f"If traffic is the goal, lean into {fi['best_format']}."
+        ))
+    if regional_insight:
+        ri = regional_insight
+        takeaway_items.append((
+            "Regional Performance",
+            f"<b>{ri['best_region']}</b> delivered clicks more efficiently than <b>{ri['worst_region']}</b> "
+            f"(${ri['best_r_cpc']:,.2f} vs ${ri['worst_r_cpc']:,.2f} Cost per Click — a {ri['r_multiple']:.1f}x gap) across the campaign. "
+            f"Worth checking {ri['worst_region']}'s format mix and targeting before shifting budget."
+        ))
+    if biggest_swing.get('magnitude', 0) > 0:
+        bs = biggest_swing
+        takeaway_items.append((
+            "Audience Delivery",
+            f"<b>{bs['format']}</b>'s delivered audience shifted meaningfully — {bs['metric']} moved from "
+            f"<b>{bs['from_val']:.0%}</b> to <b>{bs['to_val']:.0%}</b> heading into <b>{bs['week']}</b>. "
+            f"Confirm this lines up with the media plan; if not, delivery may be drifting from the intended target audience."
+        ))
+
+    if takeaway_items:
+        render_consolidated_insight_box("🧭 Campaign Learnings & Takeaways", takeaway_items)
+        st.write("---")
+
+    # --------------------------------------------------------------------------
     # TIER 1 — Platform-comparable metrics (safe to compare across formats)
     # --------------------------------------------------------------------------
     st.subheader("📊 Tier 1 — Platform-Comparable Metrics")
@@ -2288,55 +2413,24 @@ def render_social_format_efficiency():
     st.write("---")
 
     # --------------------------------------------------------------------------
-    # INSIGHT BOX
+    # INSIGHT BOX (reuses format_insight computed earlier for the top summary)
     # --------------------------------------------------------------------------
-    avg_cpc = trend_df.groupby('Format')['Cost per Click'].mean().sort_values()
-    if len(avg_cpc) >= 2:
-        best_format, best_cpc = avg_cpc.index[0], avg_cpc.iloc[0]
-        worst_format, worst_cpc = avg_cpc.index[-1], avg_cpc.iloc[-1]
-        multiple = (worst_cpc / best_cpc) if best_cpc > 0 else 0
-
+    if format_insight:
+        fi = format_insight
         render_insight_box(
-            what=f"Across the {trend_df['Week'].nunique()} week(s) analyzed, <b>{best_format}</b> delivered the lowest average Cost per Click at <b>${best_cpc:,.2f}</b>, versus <b>{worst_format}</b> at <b>${worst_cpc:,.2f}</b> — a <b>{multiple:.1f}x</b> difference.",
-            so_what=f"Engagement Rate alone looks similar across formats, but that's an artifact of Meta defining \"engagement\" differently per format (see Tier 2). Cost per Click is defined identically everywhere, and it shows {best_format} converting spend into actual site traffic far more efficiently than {worst_format}.",
-            now_what=f"If the objective is driving traffic, shift incremental budget toward {best_format}. If {worst_format} is intentionally being used for reach or video completion rather than clicks, that's a valid reason to keep its spend — just don't justify it by comparing its Engagement Rate to {best_format}'s."
+            what=f"Across the {trend_df['Week'].nunique()} week(s) analyzed, <b>{fi['best_format']}</b> delivered the lowest average Cost per Click at <b>${fi['best_cpc']:,.2f}</b>, versus <b>{fi['worst_format']}</b> at <b>${fi['worst_cpc']:,.2f}</b> — a <b>{fi['multiple']:.1f}x</b> difference.",
+            so_what=f"Engagement Rate alone looks similar across formats, but that's an artifact of Meta defining \"engagement\" differently per format (see Tier 2). Cost per Click is defined identically everywhere, and it shows {fi['best_format']} converting spend into actual site traffic far more efficiently than {fi['worst_format']}.",
+            now_what=f"If the objective is driving traffic, shift incremental budget toward {fi['best_format']}. If {fi['worst_format']} is intentionally being used for reach or video completion rather than clicks, that's a valid reason to keep its spend — just don't justify it by comparing its Engagement Rate to {fi['best_format']}'s."
         )
 
     st.write("---")
 
     # --------------------------------------------------------------------------
-    # REGIONAL EFFICIENCY — aggregated across formats, per market
+    # REGIONAL EFFICIENCY — aggregated across formats, per market (regional_df computed earlier)
     # --------------------------------------------------------------------------
     st.subheader("🗺️ Regional Efficiency")
     st.caption("Aggregated across all formats per market. Only comparable metrics (Spend, Impressions, CPM, Clickouts, CTR, Cost per Click) are shown — blending Engagement Rate across formats within a region would compound the same definition-mixing problem flagged in Tier 2, so it's intentionally left out here.")
 
-    regional_rows = []
-    for wk in all_weeks:
-        for region_name, region_df in wk['regional'].items():
-            if region_df is None or region_df.empty or 'Network-Format' not in region_df.columns:
-                continue
-            rdf = region_df[region_df['Network-Format'].astype(str).str.strip() != 'Totals'].copy()
-            for c in ['Total Impressions', 'Total Clickouts', 'Spent']:
-                if c in rdf.columns:
-                    rdf[c] = pd.to_numeric(rdf[c], errors='coerce').fillna(0)
-                else:
-                    rdf[c] = 0
-
-            spend = rdf['Spent'].sum()
-            impressions = rdf['Total Impressions'].sum()
-            clicks = rdf['Total Clickouts'].sum()
-            regional_rows.append({
-                'Week': wk['week_label'],
-                'Region': region_name,
-                'Spend': spend,
-                'Impressions': impressions,
-                'Clickouts': clicks,
-                'CPM': (spend / impressions * 1000) if impressions else 0.0,
-                'CTR': (clicks / impressions) if impressions else 0.0,
-                'Cost per Click': (spend / clicks) if clicks else 0.0,
-            })
-
-    regional_df = pd.DataFrame(regional_rows)
     if regional_df.empty:
         st.info("No regional breakdown sections were found in the uploaded file(s).")
     else:
@@ -2355,16 +2449,12 @@ def render_social_format_efficiency():
         fig_region.update_layout(yaxis=dict(title="Cost per Click", tickprefix='$'), xaxis=dict(title=None))
         st.plotly_chart(fig_region, use_container_width=True)
 
-        avg_cpc_region = regional_df.groupby('Region')['Cost per Click'].mean().sort_values()
-        if len(avg_cpc_region) >= 2:
-            best_region, best_r_cpc = avg_cpc_region.index[0], avg_cpc_region.iloc[0]
-            worst_region, worst_r_cpc = avg_cpc_region.index[-1], avg_cpc_region.iloc[-1]
-            r_multiple = (worst_r_cpc / best_r_cpc) if best_r_cpc > 0 else 0
-
+        if regional_insight:
+            ri = regional_insight
             render_insight_box(
-                what=f"Across the {regional_df['Week'].nunique()} week(s) analyzed, <b>{best_region}</b> had the lowest average Cost per Click at <b>${best_r_cpc:,.2f}</b>, versus <b>{worst_region}</b> at <b>${worst_r_cpc:,.2f}</b> — a <b>{r_multiple:.1f}x</b> difference.",
-                so_what=f"This is aggregated across all formats, so it isn't a definition-mixing artifact like the Tier 2 trap — it reflects how efficiently spend in {worst_region} actually converted into clicks compared to {best_region}, regardless of format mix.",
-                now_what=f"Before shifting budget, check whether {worst_region}'s format mix, targeting, or local competitive conditions differ from {best_region}. A market with a higher Cost per Click but strong in-store or offline results may still be worth the spend — this metric flags where to investigate, not a verdict on its own."
+                what=f"Across the {regional_df['Week'].nunique()} week(s) analyzed, <b>{ri['best_region']}</b> had the lowest average Cost per Click at <b>${ri['best_r_cpc']:,.2f}</b>, versus <b>{ri['worst_region']}</b> at <b>${ri['worst_r_cpc']:,.2f}</b> — a <b>{ri['r_multiple']:.1f}x</b> difference.",
+                so_what=f"This is aggregated across all formats, so it isn't a definition-mixing artifact like the Tier 2 trap — it reflects how efficiently spend in {ri['worst_region']} actually converted into clicks compared to {ri['best_region']}, regardless of format mix.",
+                now_what=f"Before shifting budget, check whether {ri['worst_region']}'s format mix, targeting, or local competitive conditions differ from {ri['best_region']}. A market with a higher Cost per Click but strong in-store or offline results may still be worth the spend — this metric flags where to investigate, not a verdict on its own."
             )
 
     st.write("---")
@@ -2374,23 +2464,6 @@ def render_social_format_efficiency():
     # --------------------------------------------------------------------------
     st.subheader("👥 Audience Demographics by Format")
     st.caption("This reflects who Meta actually SERVED the ads to each week (delivery), not the targeting settings — and it can shift meaningfully week to week as the algorithm optimizes delivery.")
-
-    demo_rows = []
-    for wk in all_weeks:
-        for fmt, blocks in wk.get('demographics', {}).items():
-            age_df = blocks.get('age')
-            gender_df = blocks.get('gender')
-            female_share = None
-            if gender_df is not None and not gender_df.empty:
-                f_row = gender_df[gender_df['Gender'].str.strip().str.lower() == 'female']
-                female_share = f_row['Share'].iloc[0] if not f_row.empty else None
-            share_65_plus = None
-            if age_df is not None and not age_df.empty:
-                o_row = age_df[age_df['Age Group'].str.strip() == '65+']
-                share_65_plus = o_row['Share'].iloc[0] if not o_row.empty else None
-            demo_rows.append({'Week': wk['week_label'], 'Format': fmt, 'Female Share': female_share, '65+ Share': share_65_plus})
-
-    demo_trend_df = pd.DataFrame(demo_rows)
 
     if demo_trend_df.empty:
         st.info("No demographic breakdown sections were found in the uploaded file(s).")
@@ -2439,26 +2512,6 @@ def render_social_format_efficiency():
             )
             fig_65.update_layout(yaxis=dict(title=None, tickformat='.0%', range=[0, 1]), xaxis=dict(title=None))
             st.plotly_chart(fig_65, use_container_width=True)
-
-        # Find the single largest week-over-week swing across both metrics, for the insight box.
-        # NOTE: rows are already in chronological order (built by iterating all_weeks in file
-        # order) — do NOT sort by the 'Week' label here, since strings like "June 2 - 8" vs.
-        # "June 15 - 22" sort alphabetically, not chronologically, and would scramble the sequence.
-        biggest_swing = {'magnitude': 0}
-        for metric in ['Female Share', '65+ Share']:
-            for fmt in demo_trend_df['Format'].unique():
-                series = demo_trend_df[demo_trend_df['Format'] == fmt][metric].reset_index(drop=True)
-                weeks_seq = demo_trend_df[demo_trend_df['Format'] == fmt]['Week'].reset_index(drop=True)
-                if len(series) < 2:
-                    continue
-                diffs = series.diff().abs()
-                if diffs.max() > biggest_swing['magnitude']:
-                    swing_idx = diffs.idxmax()
-                    biggest_swing = {
-                        'magnitude': diffs.max(), 'metric': metric, 'format': fmt,
-                        'from_val': series.iloc[swing_idx - 1], 'to_val': series.iloc[swing_idx],
-                        'week': weeks_seq.iloc[swing_idx]
-                    }
 
         if biggest_swing.get('magnitude', 0) > 0:
             render_insight_box(

@@ -2112,13 +2112,14 @@ def render_dvm_module_performance():
 def parse_meta_ou_report(file_obj):
     """Parses the Meta Carousel/Feed/Story weekly 'Offers Unlimited'-style report.
     The file stacks multiple sections (Overall campaign, then one block per
-    region) inside the same columns at each week's sheet, rather than being a
-    single flat table. This scans for section-title rows (non-null col A,
-    null col B) and reads each block until its rows run out.
+    region, then demographics per format) inside the same columns at each
+    week's sheet, rather than being a single flat table. This scans for
+    section-title rows (non-null col A, null col B) and reads each block
+    until its rows run out.
 
     Returns a list of dicts: {'week_label', 'overall' (DataFrame), 'regional'
-    (dict of region name -> DataFrame)}. Regional blocks are captured now so
-    Phase 2 (regional cuts) doesn't need to re-parse the file."""
+    (dict of region name -> DataFrame), 'demographics' (dict of format name ->
+    {'age': DataFrame, 'gender': DataFrame})}."""
     file_bytes = file_obj.read()
     xls = pd.ExcelFile(io.BytesIO(file_bytes))
     weekly_records = []
@@ -2164,7 +2165,27 @@ def parse_meta_ou_report(file_obj):
                 region_name = label.split(' - ')[0].strip()
                 regional[region_name] = block_df
 
-        weekly_records.append({'week_label': week_label, 'overall': overall_df, 'regional': regional})
+        # --- Audience demographics per format (age brackets + gender split) ---
+        demographics = {}
+        for i in range(len(raw)):
+            if str(raw.iloc[i, 1]).strip() == 'Engagements by age group':
+                format_name = str(raw.iloc[i, 0]).strip()
+                age_rows, gender_rows = [], []
+                r = i + 1
+                while r < len(raw) and pd.notna(raw.iloc[r, 1]):
+                    age_val = raw.iloc[r, 1]
+                    if pd.notna(age_val):
+                        age_share = raw.iloc[r, 2] if raw.shape[1] > 2 else None
+                        age_rows.append({'Age Group': str(age_val).strip(), 'Share': pd.to_numeric(age_share, errors='coerce')})
+                    if raw.shape[1] > 4:
+                        gender_val = raw.iloc[r, 4]
+                        if pd.notna(gender_val):
+                            gender_share = raw.iloc[r, 5] if raw.shape[1] > 5 else None
+                            gender_rows.append({'Gender': str(gender_val).strip(), 'Share': pd.to_numeric(gender_share, errors='coerce')})
+                    r += 1
+                demographics[format_name] = {'age': pd.DataFrame(age_rows), 'gender': pd.DataFrame(gender_rows)}
+
+        weekly_records.append({'week_label': week_label, 'overall': overall_df, 'regional': regional, 'demographics': demographics})
 
     return weekly_records
 
@@ -2344,6 +2365,106 @@ def render_social_format_efficiency():
                 what=f"Across the {regional_df['Week'].nunique()} week(s) analyzed, <b>{best_region}</b> had the lowest average Cost per Click at <b>${best_r_cpc:,.2f}</b>, versus <b>{worst_region}</b> at <b>${worst_r_cpc:,.2f}</b> — a <b>{r_multiple:.1f}x</b> difference.",
                 so_what=f"This is aggregated across all formats, so it isn't a definition-mixing artifact like the Tier 2 trap — it reflects how efficiently spend in {worst_region} actually converted into clicks compared to {best_region}, regardless of format mix.",
                 now_what=f"Before shifting budget, check whether {worst_region}'s format mix, targeting, or local competitive conditions differ from {best_region}. A market with a higher Cost per Click but strong in-store or offline results may still be worth the spend — this metric flags where to investigate, not a verdict on its own."
+            )
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # AUDIENCE DEMOGRAPHICS — actual delivered audience per format, over time
+    # --------------------------------------------------------------------------
+    st.subheader("👥 Audience Demographics by Format")
+    st.caption("This reflects who Meta actually SERVED the ads to each week (delivery), not the targeting settings — and it can shift meaningfully week to week as the algorithm optimizes delivery.")
+
+    demo_rows = []
+    for wk in all_weeks:
+        for fmt, blocks in wk.get('demographics', {}).items():
+            age_df = blocks.get('age')
+            gender_df = blocks.get('gender')
+            female_share = None
+            if gender_df is not None and not gender_df.empty:
+                f_row = gender_df[gender_df['Gender'].str.strip().str.lower() == 'female']
+                female_share = f_row['Share'].iloc[0] if not f_row.empty else None
+            share_65_plus = None
+            if age_df is not None and not age_df.empty:
+                o_row = age_df[age_df['Age Group'].str.strip() == '65+']
+                share_65_plus = o_row['Share'].iloc[0] if not o_row.empty else None
+            demo_rows.append({'Week': wk['week_label'], 'Format': fmt, 'Female Share': female_share, '65+ Share': share_65_plus})
+
+    demo_trend_df = pd.DataFrame(demo_rows)
+
+    if demo_trend_df.empty:
+        st.info("No demographic breakdown sections were found in the uploaded file(s).")
+    else:
+        export_sheets['Demographics_Trend'] = demo_trend_df
+
+        latest_week = all_weeks[-1]
+        st.markdown(f"**Age Distribution — Most Recent Week ({latest_week['week_label']})**")
+
+        latest_age_rows = []
+        for fmt, blocks in latest_week.get('demographics', {}).items():
+            age_df = blocks.get('age')
+            if age_df is not None and not age_df.empty:
+                for _, r in age_df.iterrows():
+                    latest_age_rows.append({'Format': fmt, 'Age Group': r['Age Group'], 'Share': r['Share']})
+        latest_age_df = pd.DataFrame(latest_age_rows)
+
+        if not latest_age_df.empty:
+            fig_age = px.bar(
+                latest_age_df, x='Age Group', y='Share', color='Format', barmode='group',
+                category_orders={'Age Group': ['18-24', '25-34', '35-44', '45-54', '55-64', '65+']},
+                color_discrete_sequence=['#0054B7', '#43c4f4', '#ffaf15'],
+                title=f"Delivered Age Distribution by Format — {latest_week['week_label']}"
+            )
+            fig_age.update_layout(yaxis=dict(title="Share of Engagements", tickformat='.0%'), xaxis=dict(title=None))
+            st.plotly_chart(fig_age, use_container_width=True)
+
+        st.write("")
+        st.markdown("**Female Share & 65+ Share, Trended Over Time**")
+        st.caption("A big week-over-week swing here usually means something changed upstream (creative, budget, or targeting) — worth checking against the media plan before assuming it's noise.")
+
+        d_c1, d_c2 = st.columns(2)
+        with d_c1:
+            fig_female = px.line(
+                demo_trend_df, x='Week', y='Female Share', color='Format', markers=True,
+                title="Female Share of Engagements",
+                color_discrete_sequence=['#0054B7', '#43c4f4', '#ffaf15']
+            )
+            fig_female.update_layout(yaxis=dict(title=None, tickformat='.0%', range=[0, 1]), xaxis=dict(title=None))
+            st.plotly_chart(fig_female, use_container_width=True)
+        with d_c2:
+            fig_65 = px.line(
+                demo_trend_df, x='Week', y='65+ Share', color='Format', markers=True,
+                title="65+ Share of Engagements",
+                color_discrete_sequence=['#0054B7', '#43c4f4', '#ffaf15']
+            )
+            fig_65.update_layout(yaxis=dict(title=None, tickformat='.0%', range=[0, 1]), xaxis=dict(title=None))
+            st.plotly_chart(fig_65, use_container_width=True)
+
+        # Find the single largest week-over-week swing across both metrics, for the insight box.
+        # NOTE: rows are already in chronological order (built by iterating all_weeks in file
+        # order) — do NOT sort by the 'Week' label here, since strings like "June 2 - 8" vs.
+        # "June 15 - 22" sort alphabetically, not chronologically, and would scramble the sequence.
+        biggest_swing = {'magnitude': 0}
+        for metric in ['Female Share', '65+ Share']:
+            for fmt in demo_trend_df['Format'].unique():
+                series = demo_trend_df[demo_trend_df['Format'] == fmt][metric].reset_index(drop=True)
+                weeks_seq = demo_trend_df[demo_trend_df['Format'] == fmt]['Week'].reset_index(drop=True)
+                if len(series) < 2:
+                    continue
+                diffs = series.diff().abs()
+                if diffs.max() > biggest_swing['magnitude']:
+                    swing_idx = diffs.idxmax()
+                    biggest_swing = {
+                        'magnitude': diffs.max(), 'metric': metric, 'format': fmt,
+                        'from_val': series.iloc[swing_idx - 1], 'to_val': series.iloc[swing_idx],
+                        'week': weeks_seq.iloc[swing_idx]
+                    }
+
+        if biggest_swing.get('magnitude', 0) > 0:
+            render_insight_box(
+                what=f"The largest week-over-week shift in delivered audience was <b>{biggest_swing['format']}</b>'s <b>{biggest_swing['metric']}</b>, moving from <b>{biggest_swing['from_val']:.0%}</b> to <b>{biggest_swing['to_val']:.0%}</b> going into <b>{biggest_swing['week']}</b> — a <b>{biggest_swing['magnitude']:.0%} point</b> swing.",
+                so_what=f"This is the actual audience Meta served the ad to, not a targeting setting — a swing this size usually means the algorithm reallocated delivery, often following a budget, bid, or creative change (or simply audience exhaustion in the prior segment).",
+                now_what=f"Check the media plan for anything that changed around {biggest_swing['week']}. If this shift moved {biggest_swing['format']} further from the client's intended target audience, that's worth flagging even if the click/CTR metrics still look fine."
             )
 
     if export_sheets:

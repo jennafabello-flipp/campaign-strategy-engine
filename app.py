@@ -2593,6 +2593,10 @@ def render_social_format_efficiency():
                             key=f"m6_skus_{safe_key}", height=100
                         )
 
+                    span_days = (end_date - start_date).days + 1
+                    if span_days > 10:
+                        st.warning(f"⚠️ This window spans **{span_days} days** — Meta's weekly sections are typically ~7 days. If Week start/end don't match the **{week_label}** period specifically, merch performance below will look inflated relative to that single week's Meta clicks (aggregating extra weeks of merch data against one week of social clicks).")
+
                     if sku_text.strip():
                         pasted_skus = [s.strip() for s in re.split(r'[\n,]+', sku_text) if s.strip()]
                         if len(pasted_skus) != len(cards_df):
@@ -2630,6 +2634,24 @@ def render_social_format_efficiency():
                             not_found = (crossover_df['Merch Product Name'] == 'NOT FOUND in this window').sum()
                             if not_found > 0:
                                 st.warning(f"⚠️ {not_found} of {len(crossover_df)} SKU(s) weren't found in the merchandise data for this date window — double-check the SKU list and the Week start/end dates above.")
+
+                            # --- Auto-generated insight: who's converting attention into action, and who isn't ---
+                            valid_df = crossover_df[crossover_df['Merch Product Name'] != 'NOT FOUND in this window'].copy()
+                            if len(valid_df) >= 2:
+                                valid_df['Meta_Rank'] = valid_df['Meta Link Clicks'].rank(ascending=False, method='min')
+                                valid_df['CTR_Rank'] = valid_df['Merch CTR'].rank(ascending=False, method='min')
+                                # Positive gap = ranks high on Meta clicks but low on merch CTR relative to its peers this week
+                                valid_df['Gap'] = valid_df['CTR_Rank'] - valid_df['Meta_Rank']
+
+                                best_synergy = valid_df.sort_values(['Merch TTMs', 'Merch Clicks'], ascending=False).iloc[0]
+                                biggest_gap_row = valid_df.sort_values('Gap', ascending=False).iloc[0]
+
+                                if biggest_gap_row['Gap'] > 0 and biggest_gap_row['Meta Card'] != best_synergy['Meta Card']:
+                                    render_insight_box(
+                                        what=f"<b>{best_synergy['Meta Card']}</b> converted social engagement into the strongest real signal this week — <b>{best_synergy['Merch TTMs']:.0f} TTMs</b> and a <b>{best_synergy['Merch CTR']:.2%}</b> merch CTR alongside {best_synergy['Meta Link Clicks']:,.0f} Meta link clicks. By contrast, <b>{biggest_gap_row['Meta Card']}</b> drove {biggest_gap_row['Meta Link Clicks']:,.0f} Meta clicks but converted at only <b>{biggest_gap_row['Merch CTR']:.2%}</b> on the merch side — the weakest follow-through relative to its social engagement.",
+                                        so_what=f"Raw Meta click volume alone would rank {biggest_gap_row['Meta Card']} as a top performer this week. The merch data tells a different story — that attention isn't translating into on-site or flyer engagement, while {best_synergy['Meta Card']} is earning attention AND converting it.",
+                                        now_what=f"Prioritize creative and budget toward products like {best_synergy['Meta Card']} that show up on both sides. For {biggest_gap_row['Meta Card']}, investigate pricing, placement, or product-fit before continuing to invest based on social clicks alone."
+                                    )
 
                             export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Crossover_{week_label}")[:30]] = crossover_df
 

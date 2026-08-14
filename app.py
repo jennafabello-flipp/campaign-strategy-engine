@@ -2198,7 +2198,21 @@ def parse_meta_ou_report(file_obj):
                     r += 1
                 demographics[format_name] = {'age': pd.DataFrame(age_rows), 'gender': pd.DataFrame(gender_rows)}
 
-        weekly_records.append({'week_label': week_label, 'overall': overall_df, 'regional': regional, 'demographics': demographics})
+        # --- Carousel Card product-level performance (no SKU in this export — name + clicks only) ---
+        carousel_rows = []
+        for i in range(len(raw)):
+            if str(raw.iloc[i, 0]).strip() == 'Carousel Card':
+                r = i + 1
+                while r < len(raw) and pd.notna(raw.iloc[r, 0]):
+                    carousel_rows.append({'Product': str(raw.iloc[r, 0]).strip(), 'Link Clicks': pd.to_numeric(raw.iloc[r, 1], errors='coerce')})
+                    r += 1
+                break
+        carousel_cards = pd.DataFrame(carousel_rows)
+
+        weekly_records.append({
+            'week_label': week_label, 'overall': overall_df, 'regional': regional,
+            'demographics': demographics, 'carousel_cards': carousel_cards
+        })
 
     return weekly_records
 
@@ -2519,6 +2533,107 @@ def render_social_format_efficiency():
                 so_what=f"This is the actual audience Meta served the ad to, not a targeting setting — a swing this size usually means the algorithm reallocated delivery, often following a budget, bid, or creative change (or simply audience exhaustion in the prior segment).",
                 now_what=f"Check the media plan for anything that changed around {biggest_swing['week']}. If this shift moved {biggest_swing['format']} further from the client's intended target audience, that's worth flagging even if the click/CTR metrics still look fine."
             )
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
+    # PRODUCT CROSSOVER — Social engagement x Merchandise performance
+    # Meta's export has no SKU for carousel cards, and there's no standardized
+    # feed for the client-provided SKU list yet — it arrives manually, in
+    # whatever format that week's contact used. This is built as a manual,
+    # position-matched tool (card N <-> pasted SKU N) rather than an automated
+    # parser, since there's nothing consistent yet to parse.
+    # --------------------------------------------------------------------------
+    st.subheader("🔗 Product Crossover — Social Engagement x Merchandise Performance")
+    st.caption("Meta's export doesn't include SKUs for carousel cards, so this requires the client-provided SKU list for each week, pasted in the SAME top-to-bottom order as the cards shown below. This is a manual step until the SKU feed is standardized.")
+
+    weeks_with_cards = [wk for wk in all_weeks if wk.get('carousel_cards') is not None and not wk['carousel_cards'].empty]
+
+    if not weeks_with_cards:
+        st.info("No 'Carousel Card' product sections were found in the uploaded file(s).")
+    else:
+        merch_files = st.file_uploader(
+            "Upload Merchandise Metrics covering these campaign weeks (.xlsx/.csv)",
+            type=["xlsx", "csv"], accept_multiple_files=True, key="m6_merch_crossover"
+        )
+
+        if not merch_files:
+            st.info("⚠️ Upload merchandise metrics above to enable the crossover match.")
+        else:
+            df_merch_clean, merch_mapping = parse_and_combine_multiple_files(merch_files)
+            df_merch_prod = pd.DataFrame()
+            if df_merch_clean is not None and not df_merch_clean.empty and merch_mapping is not None:
+                df_merch_prod, _, _ = process_metrics(df_merch_clean, merch_mapping)
+
+            if df_merch_prod.empty:
+                st.error("⚠️ Could not process the uploaded merchandise file(s).")
+            else:
+                df_merch_prod['SKU_clean'] = df_merch_prod['SKU'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+                merch_min = df_merch_prod['Date'].min()
+                merch_max = df_merch_prod['Date'].max()
+                default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
+                default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
+
+                for wk in weeks_with_cards:
+                    week_label = wk['week_label']
+                    cards_df = wk['carousel_cards'].reset_index(drop=True)
+                    safe_key = re.sub(r'[^A-Za-z0-9]', '_', week_label)
+
+                    st.markdown(f"#### 📅 {week_label}")
+                    render_presentation_table(cards_df, fmt={'Link Clicks': '{:,.0f}'})
+
+                    dc1, dc2, dc3 = st.columns([1, 1, 2])
+                    with dc1:
+                        start_date = st.date_input("Week start", value=default_start, key=f"m6_start_{safe_key}")
+                    with dc2:
+                        end_date = st.date_input("Week end", value=default_end, key=f"m6_end_{safe_key}")
+                    with dc3:
+                        sku_text = st.text_area(
+                            f"Paste SKUs for {week_label} — one per line, same order as the {len(cards_df)} card(s) above",
+                            key=f"m6_skus_{safe_key}", height=100
+                        )
+
+                    if sku_text.strip():
+                        pasted_skus = [s.strip() for s in re.split(r'[\n,]+', sku_text) if s.strip()]
+                        if len(pasted_skus) != len(cards_df):
+                            st.warning(f"⚠️ Pasted {len(pasted_skus)} SKU(s) but there are {len(cards_df)} card(s) for this week — counts must match so they line up correctly.")
+                        else:
+                            window_df = df_merch_prod[
+                                (df_merch_prod['Date'] >= pd.Timestamp(start_date)) & (df_merch_prod['Date'] <= pd.Timestamp(end_date))
+                            ]
+
+                            crossover_rows = []
+                            for (_, card_row), sku in zip(cards_df.iterrows(), pasted_skus):
+                                sku_clean = str(sku).strip().replace('.0', '')
+                                sub = window_df[window_df['SKU_clean'] == sku_clean]
+                                if sub.empty:
+                                    crossover_rows.append({
+                                        'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': 'NOT FOUND in this window',
+                                        'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': 0, 'Merch Clicks': 0, 'Merch CTR': 0.0, 'Merch TTMs': 0
+                                    })
+                                else:
+                                    names = sub['Name'].dropna().unique()
+                                    name = names[0] if len(names) > 0 else 'Unknown'
+                                    views, clicks, ttms = sub['Views'].sum(), sub['Clicks'].sum(), sub['TTMs'].sum()
+                                    crossover_rows.append({
+                                        'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': name,
+                                        'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': views, 'Merch Clicks': clicks,
+                                        'Merch CTR': (clicks / views) if views else 0.0, 'Merch TTMs': ttms
+                                    })
+
+                            crossover_df = pd.DataFrame(crossover_rows)
+                            render_presentation_table(
+                                crossover_df,
+                                fmt={'Meta Link Clicks': '{:,.0f}', 'Merch Views': '{:,.0f}', 'Merch Clicks': '{:,.0f}', 'Merch CTR': '{:.2%}', 'Merch TTMs': '{:,.0f}'}
+                            )
+
+                            not_found = (crossover_df['Merch Product Name'] == 'NOT FOUND in this window').sum()
+                            if not_found > 0:
+                                st.warning(f"⚠️ {not_found} of {len(crossover_df)} SKU(s) weren't found in the merchandise data for this date window — double-check the SKU list and the Week start/end dates above.")
+
+                            export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Crossover_{week_label}")[:30]] = crossover_df
+
+                    st.write("---")
 
     if export_sheets:
         output = io.BytesIO()

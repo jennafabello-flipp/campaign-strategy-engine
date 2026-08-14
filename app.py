@@ -2303,10 +2303,10 @@ pipeline_mode = st.sidebar.radio(
     [
         "🗂️ Module 1: Campaign Performance Breakdown", 
         "⚖️ Module 2: Head-to-Head Comparison", 
-        "🏆 Module 3: Industry Benchmarks", 
+        "🏆 Module 3: Industry Benchmarks (WIP - DNU)", 
         "🛒 Module 4: Taylor's Workspace",
         "📱 Module 5: DVM Module Performance",
-        "📣 Module 6: Social Campaign Performance"
+        "📣 Module 6: Social Campaign Performance (WIP - DNU)"
     ]
 )
 

@@ -387,6 +387,32 @@ def render_consolidated_insight_box(title, items):
         </div>
     """, unsafe_allow_html=True)
 
+def render_signal_comparison_card():
+    """Side-by-side comparison of the two product-selection signals: ThoughtSpot
+    top-search (shopper intent, manual pull) vs. Merchandise top-performers
+    (proven campaign performance, already flowing through this app)."""
+    html = """
+    <div style="display:flex; gap:18px; margin-top:6px;">
+      <div style="flex:1; background:#EAF2FF; border:1px solid #CFE0FA; border-radius:10px; padding:20px 22px;">
+        <div style="font-size:11px; letter-spacing:1px; color:#0668E1; font-weight:700;">SIGNAL &middot; OCCASIONAL</div>
+        <div style="font-size:19px; font-weight:700; color:#153d64; margin-top:4px;">ThoughtSpot Top Search</div>
+        <div style="margin-top:14px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Measures:</b> Shopper intent &mdash; what people are searching for, independent of whether you've ever advertised it.</div>
+        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Strength:</b> Good for discovering demand you haven't tapped yet.</div>
+        <div style="margin-top:10px; font-size:13px; color:#a15c00; line-height:1.45;"><b>Limitation:</b> A guess about what <i>might</i> convert &mdash; not proof it will.</div>
+        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Cost to use:</b> Manual report pull in ThoughtSpot, every time.</div>
+      </div>
+      <div style="flex:1; background:#EAF7EF; border:1px solid #BFE6CC; border-radius:10px; padding:20px 22px;">
+        <div style="font-size:11px; letter-spacing:1px; color:#2FA36B; font-weight:700;">SIGNAL &middot; DEFAULT</div>
+        <div style="font-size:19px; font-weight:700; color:#153d64; margin-top:4px;">Merchandise Top Performers</div>
+        <div style="margin-top:14px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Measures:</b> Actual observed performance &mdash; proof a product already drove clicks, clippings, and TTMs in your flyer/hosted channel.</div>
+        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Strength:</b> Not a guess. Already flowing through Modules 1, 2, and 4 &mdash; the tables above use that same logic.</div>
+        <div style="margin-top:10px; font-size:13px; color:#a15c00; line-height:1.45;"><b>Limitation:</b> A top flyer performer isn't guaranteed to be a top social performer &mdash; see the Coffee Table finding earlier in this module.</div>
+        <div style="margin-top:10px; font-size:13px; color:#2FA36B; font-weight:700; line-height:1.45;">Cost to use: Zero &mdash; no new report, no new upload.</div>
+      </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
 def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False, hide_index=True, max_height=None):
     """Renders a static, slide-ready HTML table with a colored header row.
     Use this instead of st.dataframe whenever the output needs to look good
@@ -2562,6 +2588,89 @@ def render_social_format_efficiency():
     st.write("---")
 
     # --------------------------------------------------------------------------
+    # TOP CANDIDATES FOR NEXT CAMPAIGN — reuses merch data already flowing
+    # through this app (same logic as the Top 10 by Clicks / CTR tables in
+    # Modules 1, 2, and 4). No new report, no new upload beyond what the
+    # Product Crossover match below already needs from the same file.
+    # --------------------------------------------------------------------------
+    st.subheader("🎯 Top Candidates for Next Campaign")
+    st.caption("Before picking products for the next social push, start with what's already proven in your flyer/hosted data. This uses the same merchandise file uploaded below for the Product Crossover match — upload once, use for both.")
+
+    merch_files = st.file_uploader(
+        "Upload Merchandise Metrics (used for both this section and the Product Crossover match below)",
+        type=["xlsx", "csv"], accept_multiple_files=True, key="m6_merch_shared"
+    )
+
+    df_merch_prod = pd.DataFrame()
+    if merch_files:
+        df_merch_clean, merch_mapping = parse_and_combine_multiple_files(merch_files)
+        if df_merch_clean is not None and not df_merch_clean.empty and merch_mapping is not None:
+            df_merch_prod, _, _ = process_metrics(df_merch_clean, merch_mapping)
+        if not df_merch_prod.empty:
+            df_merch_prod['SKU_clean'] = df_merch_prod['SKU'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+
+    if not merch_files:
+        st.info("⚠️ Upload merchandise metrics above to see top-performing candidates and to enable the Product Crossover match below.")
+    elif df_merch_prod.empty:
+        st.error("⚠️ Could not process the uploaded merchandise file(s).")
+    else:
+        merch_min = df_merch_prod['Date'].min()
+        merch_max = df_merch_prod['Date'].max()
+        default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
+        default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
+        reference_year = merch_min.year if pd.notna(merch_min) else pd.Timestamp.today().year
+
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            cand_start = st.date_input("Lookback window start", value=default_start, key="m6_cand_start")
+        with cc2:
+            cand_end = st.date_input("Lookback window end", value=default_end, key="m6_cand_end")
+
+        cand_window = df_merch_prod[(df_merch_prod['Date'] >= pd.Timestamp(cand_start)) & (df_merch_prod['Date'] <= pd.Timestamp(cand_end))]
+
+        if cand_window.empty:
+            st.warning("⚠️ No merchandise rows fall inside that window — widen the date range.")
+        else:
+            cand_grp = cand_window.groupby(['SKU_clean', 'Name']).agg({'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
+            cand_grp.rename(columns={'SKU_clean': 'SKU'}, inplace=True)
+            cand_grp['CTR'] = np.where(cand_grp['Views'] > 0, cand_grp['Clicks'] / cand_grp['Views'], 0.0)
+
+            views_floor = cand_grp['Views'].quantile(0.5) if len(cand_grp) > 1 else 0
+            cand_grp_ctr_eligible = cand_grp[cand_grp['Views'] >= views_floor]
+
+            top_clicks = cand_grp.sort_values('Clicks', ascending=False).head(10)
+            top_ctr = cand_grp_ctr_eligible.sort_values('CTR', ascending=False).head(10)
+            top_ttms = cand_grp.sort_values('TTMs', ascending=False).head(10)
+
+            export_sheets['Top_Candidates_Clicks'] = top_clicks
+            export_sheets['Top_Candidates_CTR'] = top_ctr
+            export_sheets['Top_Candidates_TTMs'] = top_ttms
+
+            cand_fmt = {'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'CTR': '{:.2%}'}
+            cand_cols = ['SKU', 'Name', 'Views', 'Clicks', 'CTR', 'TTMs']
+
+            tab1, tab2, tab3 = st.tabs(["🏆 Top by Clicks", "🎯 Top by CTR", "💰 Top by TTMs"])
+            with tab1:
+                render_presentation_table(top_clicks[cand_cols], fmt=cand_fmt)
+            with tab2:
+                st.caption(f"Limited to items with at least {views_floor:,.0f} views (the median for this window) to avoid low-sample noise skewing CTR.")
+                render_presentation_table(top_ctr[cand_cols], fmt=cand_fmt)
+            with tab3:
+                render_presentation_table(top_ttms[cand_cols], fmt=cand_fmt)
+
+        st.write("")
+        st.markdown("**Which signal should drive the pick?**")
+        render_signal_comparison_card()
+
+        render_insight_box(
+            what="<b>Merchandise Top Performers</b> (above) come from data already flowing through this app — the same logic Modules 1, 2, and 4 already use, at zero extra cost. <b>ThoughtSpot Top Search</b> answers a different question: shopper demand you haven't tested yet, not proof of what will convert.",
+            so_what="Defaulting to proven merch performers for every campaign is the lower-risk, lower-effort choice — it's already sitting here. ThoughtSpot is worth the manual pull only when deliberately expanding into a category or product you haven't already advertised.",
+            now_what="Use the shortlist above as the default source for the next campaign's product picks. Reach for ThoughtSpot occasionally — not per-campaign — when testing something genuinely new. Either way, close the loop: whatever gets featured socially should run back through the Product Crossover check below once the campaign runs, to confirm the pattern actually held on this channel too."
+        )
+
+    st.write("---")
+
+    # --------------------------------------------------------------------------
     # PRODUCT CROSSOVER — Social engagement x Merchandise performance
     # Meta's export has no SKU for carousel cards, and there's no standardized
     # feed for the client-provided SKU list yet — it arrives manually, in
@@ -2570,125 +2679,104 @@ def render_social_format_efficiency():
     # parser, since there's nothing consistent yet to parse.
     # --------------------------------------------------------------------------
     st.subheader("🔗 Product Crossover — Social Engagement x Merchandise Performance")
-    st.caption("Meta's export doesn't include SKUs for carousel cards, so this requires the client-provided SKU list for each week, pasted in the SAME top-to-bottom order as the cards shown below. This is a manual step until the SKU feed is standardized.")
+    st.caption("Meta's export doesn't include SKUs for carousel cards, so this requires the client-provided SKU list for each week, pasted in the SAME top-to-bottom order as the cards shown below. This is a manual step until the SKU feed is standardized. Uses the same merchandise upload as the Top Candidates section above.")
 
     weeks_with_cards = [wk for wk in all_weeks if wk.get('carousel_cards') is not None and not wk['carousel_cards'].empty]
 
     if not weeks_with_cards:
         st.info("No 'Carousel Card' product sections were found in the uploaded file(s).")
+    elif df_merch_prod.empty:
+        st.info("⚠️ Upload merchandise metrics in the Top Candidates section above to enable the crossover match.")
     else:
-        merch_files = st.file_uploader(
-            "Upload Merchandise Metrics covering these campaign weeks (.xlsx/.csv)",
-            type=["xlsx", "csv"], accept_multiple_files=True, key="m6_merch_crossover"
-        )
+        for wk in weeks_with_cards:
+            week_label = wk['week_label']
+            cards_df = wk['carousel_cards'].reset_index(drop=True)
+            safe_key = re.sub(r'[^A-Za-z0-9]', '_', week_label)
 
-        if not merch_files:
-            st.info("⚠️ Upload merchandise metrics above to enable the crossover match.")
-        else:
-            df_merch_clean, merch_mapping = parse_and_combine_multiple_files(merch_files)
-            df_merch_prod = pd.DataFrame()
-            if df_merch_clean is not None and not df_merch_clean.empty and merch_mapping is not None:
-                df_merch_prod, _, _ = process_metrics(df_merch_clean, merch_mapping)
+            st.markdown(f"#### 📅 {week_label}")
+            render_presentation_table(cards_df, fmt={'Link Clicks': '{:,.0f}'})
 
-            if df_merch_prod.empty:
-                st.error("⚠️ Could not process the uploaded merchandise file(s).")
+            parsed_dates = parse_week_label_to_dates(week_label, reference_year)
+            if parsed_dates:
+                week_default_start, week_default_end = parsed_dates
             else:
-                df_merch_prod['SKU_clean'] = df_merch_prod['SKU'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
-                merch_min = df_merch_prod['Date'].min()
-                merch_max = df_merch_prod['Date'].max()
-                default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
-                default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
-                reference_year = merch_min.year if pd.notna(merch_min) else pd.Timestamp.today().year
+                week_default_start, week_default_end = default_start, default_end
+                st.caption("⚠️ Couldn't infer this week's dates from its label automatically — defaulting to the full uploaded merch range below. Please set Week start/end manually.")
 
-                for wk in weeks_with_cards:
-                    week_label = wk['week_label']
-                    cards_df = wk['carousel_cards'].reset_index(drop=True)
-                    safe_key = re.sub(r'[^A-Za-z0-9]', '_', week_label)
+            dc1, dc2, dc3 = st.columns([1, 1, 2])
+            with dc1:
+                start_date = st.date_input("Week start", value=week_default_start, key=f"m6_start_{safe_key}_{week_default_start.isoformat()}")
+            with dc2:
+                end_date = st.date_input("Week end", value=week_default_end, key=f"m6_end_{safe_key}_{week_default_end.isoformat()}")
+            with dc3:
+                sku_text = st.text_area(
+                    f"Paste SKUs for {week_label} — one per line, same order as the {len(cards_df)} card(s) above",
+                    key=f"m6_skus_{safe_key}", height=100
+                )
 
-                    st.markdown(f"#### 📅 {week_label}")
-                    render_presentation_table(cards_df, fmt={'Link Clicks': '{:,.0f}'})
+            span_days = (end_date - start_date).days + 1
+            if span_days > 10:
+                st.warning(f"⚠️ This window spans **{span_days} days** — Meta's weekly sections are typically ~7 days. If Week start/end don't match the **{week_label}** period specifically, merch performance below will look inflated relative to that single week's Meta clicks (aggregating extra weeks of merch data against one week of social clicks).")
 
-                    parsed_dates = parse_week_label_to_dates(week_label, reference_year)
-                    if parsed_dates:
-                        week_default_start, week_default_end = parsed_dates
-                    else:
-                        week_default_start, week_default_end = default_start, default_end
-                        st.caption("⚠️ Couldn't infer this week's dates from its label automatically — defaulting to the full uploaded merch range below. Please set Week start/end manually.")
+            if sku_text.strip():
+                pasted_skus = [s.strip() for s in re.split(r'[\n,]+', sku_text) if s.strip()]
+                if len(pasted_skus) != len(cards_df):
+                    st.warning(f"⚠️ Pasted {len(pasted_skus)} SKU(s) but there are {len(cards_df)} card(s) for this week — counts must match so they line up correctly.")
+                else:
+                    window_df = df_merch_prod[
+                        (df_merch_prod['Date'] >= pd.Timestamp(start_date)) & (df_merch_prod['Date'] <= pd.Timestamp(end_date))
+                    ]
 
-                    dc1, dc2, dc3 = st.columns([1, 1, 2])
-                    with dc1:
-                        start_date = st.date_input("Week start", value=week_default_start, key=f"m6_start_{safe_key}_{week_default_start.isoformat()}")
-                    with dc2:
-                        end_date = st.date_input("Week end", value=week_default_end, key=f"m6_end_{safe_key}_{week_default_end.isoformat()}")
-                    with dc3:
-                        sku_text = st.text_area(
-                            f"Paste SKUs for {week_label} — one per line, same order as the {len(cards_df)} card(s) above",
-                            key=f"m6_skus_{safe_key}", height=100
-                        )
-
-                    span_days = (end_date - start_date).days + 1
-                    if span_days > 10:
-                        st.warning(f"⚠️ This window spans **{span_days} days** — Meta's weekly sections are typically ~7 days. If Week start/end don't match the **{week_label}** period specifically, merch performance below will look inflated relative to that single week's Meta clicks (aggregating extra weeks of merch data against one week of social clicks).")
-
-                    if sku_text.strip():
-                        pasted_skus = [s.strip() for s in re.split(r'[\n,]+', sku_text) if s.strip()]
-                        if len(pasted_skus) != len(cards_df):
-                            st.warning(f"⚠️ Pasted {len(pasted_skus)} SKU(s) but there are {len(cards_df)} card(s) for this week — counts must match so they line up correctly.")
+                    crossover_rows = []
+                    for (_, card_row), sku in zip(cards_df.iterrows(), pasted_skus):
+                        sku_clean = str(sku).strip().replace('.0', '')
+                        sub = window_df[window_df['SKU_clean'] == sku_clean]
+                        if sub.empty:
+                            crossover_rows.append({
+                                'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': 'NOT FOUND in this window',
+                                'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': 0, 'Merch Clicks': 0, 'Merch CTR': 0.0, 'Merch TTMs': 0
+                            })
                         else:
-                            window_df = df_merch_prod[
-                                (df_merch_prod['Date'] >= pd.Timestamp(start_date)) & (df_merch_prod['Date'] <= pd.Timestamp(end_date))
-                            ]
+                            names = sub['Name'].dropna().unique()
+                            name = names[0] if len(names) > 0 else 'Unknown'
+                            views, clicks, ttms = sub['Views'].sum(), sub['Clicks'].sum(), sub['TTMs'].sum()
+                            crossover_rows.append({
+                                'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': name,
+                                'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': views, 'Merch Clicks': clicks,
+                                'Merch CTR': (clicks / views) if views else 0.0, 'Merch TTMs': ttms
+                            })
 
-                            crossover_rows = []
-                            for (_, card_row), sku in zip(cards_df.iterrows(), pasted_skus):
-                                sku_clean = str(sku).strip().replace('.0', '')
-                                sub = window_df[window_df['SKU_clean'] == sku_clean]
-                                if sub.empty:
-                                    crossover_rows.append({
-                                        'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': 'NOT FOUND in this window',
-                                        'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': 0, 'Merch Clicks': 0, 'Merch CTR': 0.0, 'Merch TTMs': 0
-                                    })
-                                else:
-                                    names = sub['Name'].dropna().unique()
-                                    name = names[0] if len(names) > 0 else 'Unknown'
-                                    views, clicks, ttms = sub['Views'].sum(), sub['Clicks'].sum(), sub['TTMs'].sum()
-                                    crossover_rows.append({
-                                        'Meta Card': card_row['Product'], 'SKU': sku_clean, 'Merch Product Name': name,
-                                        'Meta Link Clicks': card_row['Link Clicks'], 'Merch Views': views, 'Merch Clicks': clicks,
-                                        'Merch CTR': (clicks / views) if views else 0.0, 'Merch TTMs': ttms
-                                    })
+                    crossover_df = pd.DataFrame(crossover_rows)
+                    render_presentation_table(
+                        crossover_df,
+                        fmt={'Meta Link Clicks': '{:,.0f}', 'Merch Views': '{:,.0f}', 'Merch Clicks': '{:,.0f}', 'Merch CTR': '{:.2%}', 'Merch TTMs': '{:,.0f}'}
+                    )
 
-                            crossover_df = pd.DataFrame(crossover_rows)
-                            render_presentation_table(
-                                crossover_df,
-                                fmt={'Meta Link Clicks': '{:,.0f}', 'Merch Views': '{:,.0f}', 'Merch Clicks': '{:,.0f}', 'Merch CTR': '{:.2%}', 'Merch TTMs': '{:,.0f}'}
+                    not_found = (crossover_df['Merch Product Name'] == 'NOT FOUND in this window').sum()
+                    if not_found > 0:
+                        st.warning(f"⚠️ {not_found} of {len(crossover_df)} SKU(s) weren't found in the merchandise data for this date window — double-check the SKU list and the Week start/end dates above.")
+
+                    # --- Auto-generated insight: who's converting attention into action, and who isn't ---
+                    valid_df = crossover_df[crossover_df['Merch Product Name'] != 'NOT FOUND in this window'].copy()
+                    if len(valid_df) >= 2:
+                        valid_df['Meta_Rank'] = valid_df['Meta Link Clicks'].rank(ascending=False, method='min')
+                        valid_df['CTR_Rank'] = valid_df['Merch CTR'].rank(ascending=False, method='min')
+                        # Positive gap = ranks high on Meta clicks but low on merch CTR relative to its peers this week
+                        valid_df['Gap'] = valid_df['CTR_Rank'] - valid_df['Meta_Rank']
+
+                        best_synergy = valid_df.sort_values(['Merch TTMs', 'Merch Clicks'], ascending=False).iloc[0]
+                        biggest_gap_row = valid_df.sort_values('Gap', ascending=False).iloc[0]
+
+                        if biggest_gap_row['Gap'] > 0 and biggest_gap_row['Meta Card'] != best_synergy['Meta Card']:
+                            render_insight_box(
+                                what=f"<b>{best_synergy['Meta Card']}</b> converted social engagement into the strongest real signal this week — <b>{best_synergy['Merch TTMs']:.0f} TTMs</b> and a <b>{best_synergy['Merch CTR']:.2%}</b> merch CTR alongside {best_synergy['Meta Link Clicks']:,.0f} Meta link clicks. By contrast, <b>{biggest_gap_row['Meta Card']}</b> drove {biggest_gap_row['Meta Link Clicks']:,.0f} Meta clicks but converted at only <b>{biggest_gap_row['Merch CTR']:.2%}</b> on the merch side — the weakest follow-through relative to its social engagement.",
+                                so_what=f"Raw Meta click volume alone would rank {biggest_gap_row['Meta Card']} as a top performer this week. The merch data tells a different story — that attention isn't translating into on-site or flyer engagement, while {best_synergy['Meta Card']} is earning attention AND converting it.",
+                                now_what=f"Prioritize creative and budget toward products like {best_synergy['Meta Card']} that show up on both sides. For {biggest_gap_row['Meta Card']}, investigate pricing, placement, or product-fit before continuing to invest based on social clicks alone."
                             )
 
-                            not_found = (crossover_df['Merch Product Name'] == 'NOT FOUND in this window').sum()
-                            if not_found > 0:
-                                st.warning(f"⚠️ {not_found} of {len(crossover_df)} SKU(s) weren't found in the merchandise data for this date window — double-check the SKU list and the Week start/end dates above.")
+                    export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Crossover_{week_label}")[:30]] = crossover_df
 
-                            # --- Auto-generated insight: who's converting attention into action, and who isn't ---
-                            valid_df = crossover_df[crossover_df['Merch Product Name'] != 'NOT FOUND in this window'].copy()
-                            if len(valid_df) >= 2:
-                                valid_df['Meta_Rank'] = valid_df['Meta Link Clicks'].rank(ascending=False, method='min')
-                                valid_df['CTR_Rank'] = valid_df['Merch CTR'].rank(ascending=False, method='min')
-                                # Positive gap = ranks high on Meta clicks but low on merch CTR relative to its peers this week
-                                valid_df['Gap'] = valid_df['CTR_Rank'] - valid_df['Meta_Rank']
-
-                                best_synergy = valid_df.sort_values(['Merch TTMs', 'Merch Clicks'], ascending=False).iloc[0]
-                                biggest_gap_row = valid_df.sort_values('Gap', ascending=False).iloc[0]
-
-                                if biggest_gap_row['Gap'] > 0 and biggest_gap_row['Meta Card'] != best_synergy['Meta Card']:
-                                    render_insight_box(
-                                        what=f"<b>{best_synergy['Meta Card']}</b> converted social engagement into the strongest real signal this week — <b>{best_synergy['Merch TTMs']:.0f} TTMs</b> and a <b>{best_synergy['Merch CTR']:.2%}</b> merch CTR alongside {best_synergy['Meta Link Clicks']:,.0f} Meta link clicks. By contrast, <b>{biggest_gap_row['Meta Card']}</b> drove {biggest_gap_row['Meta Link Clicks']:,.0f} Meta clicks but converted at only <b>{biggest_gap_row['Merch CTR']:.2%}</b> on the merch side — the weakest follow-through relative to its social engagement.",
-                                        so_what=f"Raw Meta click volume alone would rank {biggest_gap_row['Meta Card']} as a top performer this week. The merch data tells a different story — that attention isn't translating into on-site or flyer engagement, while {best_synergy['Meta Card']} is earning attention AND converting it.",
-                                        now_what=f"Prioritize creative and budget toward products like {best_synergy['Meta Card']} that show up on both sides. For {biggest_gap_row['Meta Card']}, investigate pricing, placement, or product-fit before continuing to invest based on social clicks alone."
-                                    )
-
-                            export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Crossover_{week_label}")[:30]] = crossover_df
-
-                    st.write("---")
+            st.write("---")
 
     if export_sheets:
         output = io.BytesIO()

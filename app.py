@@ -6,6 +6,7 @@ import io
 import re
 import os
 import gc
+import calendar
 
 # Create the hidden directories on the server if they don't exist
 if not os.path.exists("benchmarks"):
@@ -2122,6 +2123,30 @@ def render_dvm_module_performance():
 # ==============================================================================
 # 📣 MODULE 6: SOCIAL CAMPAIGN PERFORMANCE (META) — PHASE 1: FORMAT EFFICIENCY
 # ==============================================================================
+_MONTH_NAME_TO_NUM = {name.lower(): num for num, name in enumerate(calendar.month_name) if name}
+
+def parse_week_label_to_dates(week_label, reference_year):
+    """Best-effort parse of week labels like 'July 13 - July 20' or 'June 29 - July 6'
+    into real (start_date, end_date) objects. There's no year in the label itself, so
+    reference_year must come from somewhere else (the uploaded merch data's own date
+    range, in practice). Returns None if the label doesn't match the expected shape,
+    so the caller can fall back to a manual default instead of guessing wrong."""
+    m = re.match(r'^\s*([A-Za-z]+)\s+(\d{1,2})\s*-\s*([A-Za-z]+)?\s*(\d{1,2})\s*$', str(week_label).strip())
+    if not m:
+        return None
+    start_month_name, start_day, end_month_name, end_day = m.groups()
+    start_month = _MONTH_NAME_TO_NUM.get(start_month_name.lower())
+    end_month = _MONTH_NAME_TO_NUM.get(end_month_name.lower()) if end_month_name else start_month
+    if start_month is None or end_month is None:
+        return None
+    try:
+        start = pd.Timestamp(year=reference_year, month=start_month, day=int(start_day))
+        end_year = reference_year + 1 if end_month < start_month else reference_year
+        end = pd.Timestamp(year=end_year, month=end_month, day=int(end_day))
+        return start.date(), end.date()
+    except (ValueError, TypeError):
+        return None
+
 def parse_meta_ou_report(file_obj):
     """Parses the Meta Carousel/Feed/Story weekly 'Offers Unlimited'-style report.
     The file stacks multiple sections (Overall campaign, then one block per
@@ -2573,6 +2598,7 @@ def render_social_format_efficiency():
                 merch_max = df_merch_prod['Date'].max()
                 default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
                 default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
+                reference_year = merch_min.year if pd.notna(merch_min) else pd.Timestamp.today().year
 
                 for wk in weeks_with_cards:
                     week_label = wk['week_label']
@@ -2582,11 +2608,18 @@ def render_social_format_efficiency():
                     st.markdown(f"#### 📅 {week_label}")
                     render_presentation_table(cards_df, fmt={'Link Clicks': '{:,.0f}'})
 
+                    parsed_dates = parse_week_label_to_dates(week_label, reference_year)
+                    if parsed_dates:
+                        week_default_start, week_default_end = parsed_dates
+                    else:
+                        week_default_start, week_default_end = default_start, default_end
+                        st.caption("⚠️ Couldn't infer this week's dates from its label automatically — defaulting to the full uploaded merch range below. Please set Week start/end manually.")
+
                     dc1, dc2, dc3 = st.columns([1, 1, 2])
                     with dc1:
-                        start_date = st.date_input("Week start", value=default_start, key=f"m6_start_{safe_key}")
+                        start_date = st.date_input("Week start", value=week_default_start, key=f"m6_start_{safe_key}")
                     with dc2:
-                        end_date = st.date_input("Week end", value=default_end, key=f"m6_end_{safe_key}")
+                        end_date = st.date_input("Week end", value=week_default_end, key=f"m6_end_{safe_key}")
                     with dc3:
                         sku_text = st.text_area(
                             f"Paste SKUs for {week_label} — one per line, same order as the {len(cards_df)} card(s) above",

@@ -2617,9 +2617,9 @@ def render_social_format_efficiency():
 
                     dc1, dc2, dc3 = st.columns([1, 1, 2])
                     with dc1:
-                        start_date = st.date_input("Week start", value=week_default_start, key=f"m6_start_{safe_key}")
+                        start_date = st.date_input("Week start", value=week_default_start, key=f"m6_start_{safe_key}_{week_default_start.isoformat()}")
                     with dc2:
-                        end_date = st.date_input("Week end", value=week_default_end, key=f"m6_end_{safe_key}")
+                        end_date = st.date_input("Week end", value=week_default_end, key=f"m6_end_{safe_key}_{week_default_end.isoformat()}")
                     with dc3:
                         sku_text = st.text_area(
                             f"Paste SKUs for {week_label} — one per line, same order as the {len(cards_df)} card(s) above",

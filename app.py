@@ -2258,9 +2258,108 @@ def parse_meta_ou_report(file_obj):
 
     return weekly_records
 
-def render_social_format_efficiency():
-    st.markdown("<div class='main-header'>📣 Module 6: Social Campaign Performance (Meta)</div>", unsafe_allow_html=True)
-    st.markdown("<div class='sub-header'>Phase 1 — Format Spend Efficiency across Carousel, Feed, and Story. Upload the weekly performance report (one file, one sheet per week).</div>", unsafe_allow_html=True)
+def render_top_candidates_section():
+    """Shared, channel-agnostic Product Selection. Uses only merchandise data —
+    no ad-platform report needed — so it sits above the channel tabs and runs
+    once, regardless of which channel someone is working in. Returns the parsed
+    merch data and date defaults so channel tabs (e.g. Meta's Product Crossover)
+    can reuse the same upload without asking the user to provide it twice."""
+    st.subheader("🎯 Top Candidates for Next Campaign")
+    st.caption("Before picking products for any channel's next push, start with what's already proven in your flyer/hosted data. This same upload also powers each channel tab's Product Crossover match below — upload once, use everywhere.")
+
+    dl_placeholder = st.empty()
+    merch_files = st.file_uploader(
+        "Upload Merchandise Metrics (used across every channel tab below)",
+        type=["xlsx", "csv"], accept_multiple_files=True, key="m6_merch_shared"
+    )
+
+    df_merch_prod = pd.DataFrame()
+    export_sheets = {}
+    reference_year = pd.Timestamp.today().year
+    default_start = default_end = pd.Timestamp.today().date()
+
+    if merch_files:
+        df_merch_clean, merch_mapping = parse_and_combine_multiple_files(merch_files)
+        if df_merch_clean is not None and not df_merch_clean.empty and merch_mapping is not None:
+            df_merch_prod, _, _ = process_metrics(df_merch_clean, merch_mapping)
+        if not df_merch_prod.empty:
+            df_merch_prod['SKU_clean'] = df_merch_prod['SKU'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+
+    if not merch_files:
+        st.info("⚠️ Upload merchandise metrics above to see top-performing candidates and to enable each channel's Product Crossover match.")
+    elif df_merch_prod.empty:
+        st.error("⚠️ Could not process the uploaded merchandise file(s).")
+    else:
+        merch_min = df_merch_prod['Date'].min()
+        merch_max = df_merch_prod['Date'].max()
+        default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
+        default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
+        reference_year = merch_min.year if pd.notna(merch_min) else pd.Timestamp.today().year
+
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            cand_start = st.date_input("Lookback window start", value=default_start, key="m6_cand_start")
+        with cc2:
+            cand_end = st.date_input("Lookback window end", value=default_end, key="m6_cand_end")
+
+        cand_window = df_merch_prod[(df_merch_prod['Date'] >= pd.Timestamp(cand_start)) & (df_merch_prod['Date'] <= pd.Timestamp(cand_end))]
+
+        if cand_window.empty:
+            st.warning("⚠️ No merchandise rows fall inside that window — widen the date range.")
+        else:
+            cand_grp = cand_window.groupby(['SKU_clean', 'Name']).agg({'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
+            cand_grp.rename(columns={'SKU_clean': 'SKU'}, inplace=True)
+            cand_grp['CTR'] = np.where(cand_grp['Views'] > 0, cand_grp['Clicks'] / cand_grp['Views'], 0.0)
+
+            views_floor = cand_grp['Views'].quantile(0.5) if len(cand_grp) > 1 else 0
+            cand_grp_ctr_eligible = cand_grp[cand_grp['Views'] >= views_floor]
+
+            top_clicks = cand_grp.sort_values('Clicks', ascending=False).head(10)
+            top_ctr = cand_grp_ctr_eligible.sort_values('CTR', ascending=False).head(10)
+            top_ttms = cand_grp.sort_values('TTMs', ascending=False).head(10)
+
+            export_sheets['Top_Candidates_Clicks'] = top_clicks
+            export_sheets['Top_Candidates_CTR'] = top_ctr
+            export_sheets['Top_Candidates_TTMs'] = top_ttms
+
+            cand_fmt = {'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'CTR': '{:.2%}'}
+            cand_cols = ['SKU', 'Name', 'Views', 'Clicks', 'CTR', 'TTMs']
+
+            tab1, tab2, tab3 = st.tabs(["🏆 Top by Clicks", "🎯 Top by CTR", "💰 Top by TTMs"])
+            with tab1:
+                render_presentation_table(top_clicks[cand_cols], fmt=cand_fmt)
+            with tab2:
+                st.caption(f"Limited to items with at least {views_floor:,.0f} views (the median for this window) to avoid low-sample noise skewing CTR.")
+                render_presentation_table(top_ctr[cand_cols], fmt=cand_fmt)
+            with tab3:
+                render_presentation_table(top_ttms[cand_cols], fmt=cand_fmt)
+
+        st.write("")
+        render_signal_comparison_card()
+
+    if export_sheets:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name, df_sheet in export_sheets.items():
+                df_sheet.to_excel(writer, sheet_name=str(sheet_name)[:31], index=False)
+        output.seek(0)
+        dl_placeholder.download_button(
+            label="⬇️ Download Top Candidates Shortlist (.xlsx)",
+            data=output,
+            file_name="Top_Candidates_Shortlist.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    return df_merch_prod, reference_year, default_start, default_end
+
+
+def render_meta_channel(df_merch_prod, reference_year, default_start, default_end):
+    """Meta (Facebook/Instagram) channel analysis — the only channel with a real,
+    tested parser so far. Everything below (Tiers, Regional, Demographics,
+    Product Crossover) is specific to Meta's own report structure; other
+    channels get their own version of this function once we have a real
+    report from them to build and test against."""
+    st.markdown("<div class='sub-header'>Format Spend Efficiency across Carousel, Feed, and Story. Upload the weekly performance report (one file, one sheet per week).</div>", unsafe_allow_html=True)
 
     dl_placeholder = st.empty()
     social_files = st.file_uploader("Upload Meta Weekly Performance Report(s) (.xlsx)", type=["xlsx"], accept_multiple_files=True, key="m6_meta")
@@ -2467,7 +2566,6 @@ def render_social_format_efficiency():
         export_sheets[re.sub(r'[\\/*?:\[\]]', '_', f"Engagement_{fmt}")[:30]] = fmt_df
 
     st.write("---")
-
     # --------------------------------------------------------------------------
     # INSIGHT BOX (reuses format_insight computed earlier for the top summary)
     # --------------------------------------------------------------------------
@@ -2577,80 +2675,6 @@ def render_social_format_efficiency():
             )
 
     st.write("---")
-
-    # --------------------------------------------------------------------------
-    # TOP CANDIDATES FOR NEXT CAMPAIGN — reuses merch data already flowing
-    # through this app (same logic as the Top 10 by Clicks / CTR tables in
-    # Modules 1, 2, and 4). No new report, no new upload beyond what the
-    # Product Crossover match below already needs from the same file.
-    # --------------------------------------------------------------------------
-    st.subheader("🎯 Top Candidates for Next Campaign")
-    st.caption("Before picking products for the next social push, start with what's already proven in your flyer/hosted data. This uses the same merchandise file uploaded below for the Product Crossover match — upload once, use for both.")
-
-    merch_files = st.file_uploader(
-        "Upload Merchandise Metrics (used for both this section and the Product Crossover match below)",
-        type=["xlsx", "csv"], accept_multiple_files=True, key="m6_merch_shared"
-    )
-
-    df_merch_prod = pd.DataFrame()
-    if merch_files:
-        df_merch_clean, merch_mapping = parse_and_combine_multiple_files(merch_files)
-        if df_merch_clean is not None and not df_merch_clean.empty and merch_mapping is not None:
-            df_merch_prod, _, _ = process_metrics(df_merch_clean, merch_mapping)
-        if not df_merch_prod.empty:
-            df_merch_prod['SKU_clean'] = df_merch_prod['SKU'].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
-
-    if not merch_files:
-        st.info("⚠️ Upload merchandise metrics above to see top-performing candidates and to enable the Product Crossover match below.")
-    elif df_merch_prod.empty:
-        st.error("⚠️ Could not process the uploaded merchandise file(s).")
-    else:
-        merch_min = df_merch_prod['Date'].min()
-        merch_max = df_merch_prod['Date'].max()
-        default_start = merch_min.date() if pd.notna(merch_min) else pd.Timestamp.today().date()
-        default_end = merch_max.date() if pd.notna(merch_max) else pd.Timestamp.today().date()
-        reference_year = merch_min.year if pd.notna(merch_min) else pd.Timestamp.today().year
-
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            cand_start = st.date_input("Lookback window start", value=default_start, key="m6_cand_start")
-        with cc2:
-            cand_end = st.date_input("Lookback window end", value=default_end, key="m6_cand_end")
-
-        cand_window = df_merch_prod[(df_merch_prod['Date'] >= pd.Timestamp(cand_start)) & (df_merch_prod['Date'] <= pd.Timestamp(cand_end))]
-
-        if cand_window.empty:
-            st.warning("⚠️ No merchandise rows fall inside that window — widen the date range.")
-        else:
-            cand_grp = cand_window.groupby(['SKU_clean', 'Name']).agg({'Views': 'sum', 'Clicks': 'sum', 'Clips': 'sum', 'TTMs': 'sum'}).reset_index()
-            cand_grp.rename(columns={'SKU_clean': 'SKU'}, inplace=True)
-            cand_grp['CTR'] = np.where(cand_grp['Views'] > 0, cand_grp['Clicks'] / cand_grp['Views'], 0.0)
-
-            views_floor = cand_grp['Views'].quantile(0.5) if len(cand_grp) > 1 else 0
-            cand_grp_ctr_eligible = cand_grp[cand_grp['Views'] >= views_floor]
-
-            top_clicks = cand_grp.sort_values('Clicks', ascending=False).head(10)
-            top_ctr = cand_grp_ctr_eligible.sort_values('CTR', ascending=False).head(10)
-            top_ttms = cand_grp.sort_values('TTMs', ascending=False).head(10)
-
-            export_sheets['Top_Candidates_Clicks'] = top_clicks
-            export_sheets['Top_Candidates_CTR'] = top_ctr
-            export_sheets['Top_Candidates_TTMs'] = top_ttms
-
-            cand_fmt = {'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'CTR': '{:.2%}'}
-            cand_cols = ['SKU', 'Name', 'Views', 'Clicks', 'CTR', 'TTMs']
-
-            tab1, tab2, tab3 = st.tabs(["🏆 Top by Clicks", "🎯 Top by CTR", "💰 Top by TTMs"])
-            with tab1:
-                render_presentation_table(top_clicks[cand_cols], fmt=cand_fmt)
-            with tab2:
-                st.caption(f"Limited to items with at least {views_floor:,.0f} views (the median for this window) to avoid low-sample noise skewing CTR.")
-                render_presentation_table(top_ctr[cand_cols], fmt=cand_fmt)
-            with tab3:
-                render_presentation_table(top_ttms[cand_cols], fmt=cand_fmt)
-
-        st.write("")
-        render_signal_comparison_card()
 
     st.write("---")
 
@@ -2770,11 +2794,44 @@ def render_social_format_efficiency():
         output.seek(0)
 
         dl_placeholder.download_button(
-            label="⬇️ Download Social Format Efficiency Report (.xlsx)",
+            label="⬇️ Download Meta Format Efficiency Report (.xlsx)",
             data=output,
-            file_name="Social_Format_Efficiency_Report.xlsx",
+            file_name="Meta_Format_Efficiency_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+
+def render_channel_placeholder(channel_name, icon):
+    """Stub for a channel we don't have a real, tested report for yet. Same
+    discipline as every other module in this app: no fabricated specs or
+    logic until there's a real file to build and test against."""
+    st.markdown(f"<div class='sub-header'>{icon} {channel_name} — Not Built Yet</div>", unsafe_allow_html=True)
+    st.file_uploader(f"Upload {channel_name} Weekly Performance Report(s)", type=["xlsx", "csv"], key=f"m6_stub_{channel_name.lower().replace(' ', '_')}")
+    st.info(f"⚠️ We don't have a real {channel_name} campaign report yet to build and test a parser against — so this tab is a placeholder, not a working analysis. The upload above won't be processed. Once a real {channel_name} report comes in, this tab gets the same full build-out Meta got: its own parser, its own comparable-vs-native metric tiers, and testing against actual data before anything here is called a finding.")
+
+
+def render_social_format_efficiency():
+    st.markdown("<div class='main-header'>📣 Module 6: Social Campaign Performance</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Product selection is shared across every channel. Pick a channel tab below for format-level performance, safe zones, and efficiency analysis.</div>", unsafe_allow_html=True)
+
+    df_merch_prod, reference_year, default_start, default_end = render_top_candidates_section()
+
+    st.write("---")
+
+    tabs = st.tabs(["📘 Meta", "📌 Pinterest", "▶️ YouTube", "🔍 Google Ads", "🎵 TikTok", "🖥️ Programmatic Display"])
+    with tabs[0]:
+        render_meta_channel(df_merch_prod, reference_year, default_start, default_end)
+    with tabs[1]:
+        render_channel_placeholder("Pinterest", "📌")
+    with tabs[2]:
+        render_channel_placeholder("YouTube", "▶️")
+    with tabs[3]:
+        render_channel_placeholder("Google Ads", "🔍")
+    with tabs[4]:
+        render_channel_placeholder("TikTok", "🎵")
+    with tabs[5]:
+        render_channel_placeholder("Programmatic Display", "🖥️")
+
 
 # ---------------------------------------------------------
 # 🧭 SIDEBAR NAVIGATION MENU

@@ -397,8 +397,7 @@ def render_signal_comparison_card():
     <div style="background:#FFF8E6; border:1px solid #F2DFA0; border-radius:10px; padding:16px 20px; margin-top:6px; display:flex; align-items:flex-start; gap:12px;">
       <div style="font-size:20px; line-height:1.3;">\U0001F4A1</div>
       <div style="font-size:13.5px; color:#3a3226; line-height:1.55;">
-        <b>Quick tip:</b> Default to the <b>Merchandise Top Performers</b> above &mdash; it's already proven and costs nothing extra to pull.
-        Reach for a <b>ThoughtSpot Top Search</b> pull only when you're deliberately testing a new category or checking seasonal timing &mdash; not for every campaign.
+        <b>Quick tip:</b> Default to the <b>Merchandise Top Performers</b> above. Reach for a <b>ThoughtSpot Top Search</b> pull only when you're deliberately testing a new category or checking seasonal timing &mdash; not for every campaign.
       </div>
     </div>
     """

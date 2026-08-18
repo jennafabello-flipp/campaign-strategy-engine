@@ -388,26 +388,17 @@ def render_consolidated_insight_box(title, items):
     """, unsafe_allow_html=True)
 
 def render_signal_comparison_card():
-    """Side-by-side comparison of the two product-selection signals: ThoughtSpot
-    top-search (shopper intent, manual pull) vs. Merchandise top-performers
-    (proven campaign performance, already flowing through this app)."""
+    """Compact 'quick tip' callout contrasting the two product-selection signals:
+    Merchandise Top Performers (proven, free, already in this app) vs. ThoughtSpot
+    Top Search (shopper intent, manual pull, occasional use). Kept short and
+    scannable rather than a full side-by-side comparison — this sits inline in
+    a working tool, not a report someone reads slide-by-slide."""
     html = """
-    <div style="display:flex; gap:18px; margin-top:6px;">
-      <div style="flex:1; background:#EAF2FF; border:1px solid #CFE0FA; border-radius:10px; padding:20px 22px;">
-        <div style="font-size:11px; letter-spacing:1px; color:#0668E1; font-weight:700;">SIGNAL &middot; OCCASIONAL</div>
-        <div style="font-size:19px; font-weight:700; color:#153d64; margin-top:4px;">ThoughtSpot Top Search</div>
-        <div style="margin-top:14px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Measures:</b> Shopper intent &mdash; what people are searching for, independent of whether you've ever advertised it.</div>
-        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Strength:</b> Good for discovering demand you haven't tapped yet.</div>
-        <div style="margin-top:10px; font-size:13px; color:#a15c00; line-height:1.45;"><b>Limitation:</b> A guess about what <i>might</i> convert &mdash; not proof it will.</div>
-        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Cost to use:</b> Manual report pull in ThoughtSpot, every time.</div>
-      </div>
-      <div style="flex:1; background:#EAF7EF; border:1px solid #BFE6CC; border-radius:10px; padding:20px 22px;">
-        <div style="font-size:11px; letter-spacing:1px; color:#2FA36B; font-weight:700;">SIGNAL &middot; DEFAULT</div>
-        <div style="font-size:19px; font-weight:700; color:#153d64; margin-top:4px;">Merchandise Top Performers</div>
-        <div style="margin-top:14px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Measures:</b> Actual observed performance &mdash; proof a product already drove clicks, clippings, and TTMs in your flyer/hosted channel.</div>
-        <div style="margin-top:10px; font-size:13px; color:#2c3e50; line-height:1.45;"><b>Strength:</b> Not a guess. Already flowing through Modules 1, 2, and 4 &mdash; the tables above use that same logic.</div>
-        <div style="margin-top:10px; font-size:13px; color:#a15c00; line-height:1.45;"><b>Limitation:</b> A top flyer performer isn't guaranteed to be a top social performer &mdash; see the Coffee Table finding earlier in this module.</div>
-        <div style="margin-top:10px; font-size:13px; color:#2FA36B; font-weight:700; line-height:1.45;">Cost to use: Zero &mdash; no new report, no new upload.</div>
+    <div style="background:#FFF8E6; border:1px solid #F2DFA0; border-radius:10px; padding:16px 20px; margin-top:6px; display:flex; align-items:flex-start; gap:12px;">
+      <div style="font-size:20px; line-height:1.3;">\U0001F4A1</div>
+      <div style="font-size:13.5px; color:#3a3226; line-height:1.55;">
+        <b>Quick tip:</b> Default to the <b>Merchandise Top Performers</b> above &mdash; it's already proven and costs nothing extra to pull.
+        Reach for a <b>ThoughtSpot Top Search</b> pull only when you're deliberately testing a new category or checking seasonal timing &mdash; not for every campaign.
       </div>
     </div>
     """
@@ -2659,14 +2650,7 @@ def render_social_format_efficiency():
                 render_presentation_table(top_ttms[cand_cols], fmt=cand_fmt)
 
         st.write("")
-        st.markdown("**Which signal should drive the pick?**")
         render_signal_comparison_card()
-
-        render_insight_box(
-            what="<b>Merchandise Top Performers</b> (above) come from data already flowing through this app — the same logic Modules 1, 2, and 4 already use, at zero extra cost. <b>ThoughtSpot Top Search</b> answers a different question: shopper demand you haven't tested yet, not proof of what will convert.",
-            so_what="Defaulting to proven merch performers for every campaign is the lower-risk, lower-effort choice — it's already sitting here. ThoughtSpot is worth the manual pull only when deliberately expanding into a category or product you haven't already advertised.",
-            now_what="Use the shortlist above as the default source for the next campaign's product picks. Reach for ThoughtSpot occasionally — not per-campaign — when testing something genuinely new. Either way, close the loop: whatever gets featured socially should run back through the Product Crossover check below once the campaign runs, to confirm the pattern actually held on this channel too."
-        )
 
     st.write("---")
 

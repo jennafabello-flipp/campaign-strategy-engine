@@ -195,10 +195,13 @@ class GoogleTaxonomyClassifier:
 
 @st.cache_resource
 def load_taxonomy_classifier():
-    """Loads and builds the taxonomy classifier once per session. Returns None
-    (rather than raising) if the taxonomy file isn't deployed alongside this
-    app yet, so a missing file degrades gracefully to the old default instead
-    of crashing every module that touches categorization."""
+    """Loads and builds the taxonomy classifier once per session. Raises on
+    failure rather than returning None -- st.cache_resource caches whatever a
+    function returns, including None, so a single early failure (e.g. before
+    the taxonomy file was actually in the repo yet) would otherwise get stuck
+    cached forever across every rerun, with no way to self-correct short of a
+    manual app reboot. Raising means nothing gets cached until this actually
+    succeeds; the caller is responsible for catching the exception."""
     candidates = []
     try:
         candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_data", "Taxonomy_en-US.txt"))
@@ -208,11 +211,16 @@ def load_taxonomy_classifier():
     candidates.append("Taxonomy_en-US.txt")
     for path in candidates:
         if os.path.exists(path):
-            try:
-                return GoogleTaxonomyClassifier(path)
-            except Exception:
-                return None
-    return None
+            return GoogleTaxonomyClassifier(path)
+    raise FileNotFoundError(f"Taxonomy_en-US.txt not found in any of: {candidates}")
+
+def get_taxonomy_classifier_safe():
+    """Wraps the cached loader so a failure is never cached, and never crashes
+    the caller -- returns (classifier_or_None, error_or_None)."""
+    try:
+        return load_taxonomy_classifier(), None
+    except Exception as e:
+        return None, e
 
 # ==============================================================================
 # 🚀 SETUP & CONFIGURATION
@@ -438,7 +446,7 @@ def process_metrics(df, m):
     # appliance itself). Only L1 is validated right now; L2/L3 fall through
     # to Custom ID or the existing generic defaults until L2/L3 accuracy is
     # tested on its own.
-    _taxonomy_clf = load_taxonomy_classifier()
+    _taxonomy_clf, _ = get_taxonomy_classifier_safe()
     needs_taxonomy_mask = df.apply(lambda r: _has_value(r, 'c1') is None and _has_value(r, 'ret_cat') is None, axis=1)
     taxonomy_l1_lookup = {}
     if _taxonomy_clf is not None and needs_taxonomy_mask.any():
@@ -952,7 +960,7 @@ def render_single_campaign_matrix():
             col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
 
             with st.expander("🔍 Taxonomy Classifier Status (debug)"):
-                _debug_clf = load_taxonomy_classifier()
+                _debug_clf, _debug_error = get_taxonomy_classifier_safe()
                 _debug_candidates = []
                 try:
                     _debug_candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_data", "Taxonomy_en-US.txt"))
@@ -968,20 +976,9 @@ def render_single_campaign_matrix():
                 for p in _debug_candidates:
                     exists = os.path.exists(p)
                     st.caption(f"{'✅' if exists else '❌'} `{os.path.abspath(p)}`")
-                # If a path exists but the classifier still failed to build, the
-                # exception is being silently swallowed by load_taxonomy_classifier's
-                # deliberate fail-safe (so a bad file can't crash the whole app).
-                # Reproduce it here, unguarded, so the real error is visible instead
-                # of just "not loaded."
-                if _debug_clf is None:
-                    existing = next((p for p in _debug_candidates if os.path.exists(p)), None)
-                    if existing:
-                        st.caption("A path exists but building the classifier failed — attempting again here to show the real error:")
-                        try:
-                            _ = GoogleTaxonomyClassifier(existing)
-                            st.warning("Rebuilt successfully just now — this may have been a transient issue. Try refreshing the page.")
-                        except Exception as _debug_e:
-                            st.exception(_debug_e)
+                if _debug_error is not None:
+                    st.caption("The actual error (this is no longer cached — it will retry fresh on the next rerun once fixed):")
+                    st.exception(_debug_error)
 
             def build_cat_agg(cat_col, level):
                 if not cat_col or cat_col not in df_prod.columns: return pd.DataFrame()

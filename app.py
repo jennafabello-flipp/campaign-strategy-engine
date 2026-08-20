@@ -488,27 +488,43 @@ def extract_campaign_header_metadata(df):
     return merchant, run_name, run_id, date_from, date_to
 
 def resolve_taxonomy_column_by_level(df, level):
+    # IMPORTANT: the actual VALUE always comes from the already-resolved
+    # L1_Category / L2_Category / L3_Category column, which process_metrics
+    # builds via the real cascade (Custom ID -> Retailer Category -> taxonomy
+    # classifier for L1 -> generic default). This function used to
+    # independently re-derive a column from raw candidates and, for L1,
+    # checked 'Google Category L1' BEFORE 'L1_Category' -- meaning it silently
+    # read the raw, unreliable Google Category column directly and never
+    # reached the corrected one whenever a retailer's raw file still had that
+    # column populated (which is most of them). The tier1/tier2 checks below
+    # are now only used to label WHICH tier actually supplied the value, for
+    # the "Data Source" caption -- not to pick a different column to read.
     if level == 1:
         tier1 = ['Custom ID 1', 'Custom ID', 'Custom Category L1', 'Custom_ID_1']
         tier2 = ['Retailer Category L1', 'Retailer Category', 'Category L1', 'Department L1', 'Dept L1']
-        tier3 = ['Google Category L1', 'L1_Category', 'Google Category']
+        resolved_col = 'L1_Category'
+        fallback_label = 'Auto-Classified (Taxonomy) / General Merchandise'
     elif level == 2:
         tier1 = ['Custom ID 2', 'Custom Category L2', 'Custom_ID_2', 'Custom ID 1', 'Custom ID']
         tier2 = ['Retailer Category L2', 'Retailer Subcategory', 'Category L2', 'Department L2', 'Dept L2', 'Retailer Category']
-        tier3 = ['Google Category L2', 'L2_Category', 'Google Category.1', 'Google Category L1', 'Google Category']
+        resolved_col = 'L2_Category'
+        fallback_label = 'Uncategorized'
     elif level == 3:
         tier1 = ['Custom ID 3', 'Custom Category L3', 'Custom_ID_3', 'Custom ID 1', 'Custom ID']
         tier2 = ['Retailer Category L3', 'Retailer Sub-subcategory', 'Category L3', 'Department L3', 'Dept L3', 'Retailer Category']
-        tier3 = ['Google Category L3', 'L3_Category', 'Google Category.2', 'Google Category L1', 'Google Category']
+        resolved_col = 'L3_Category'
+        fallback_label = 'Uncategorized'
     else:
         return None, "N/A"
 
+    if resolved_col not in df.columns:
+        return None, "N/A"
+
     for col in tier1:
-        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Custom ID'
+        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return resolved_col, 'Custom ID'
     for col in tier2:
-        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Retailer Category'
-    for col in tier3:
-        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return col, 'Google Category'
+        if col in df.columns and df[col].dropna().astype(str).str.strip().ne('').any(): return resolved_col, 'Retailer Category'
+    return resolved_col, fallback_label
 
     return None, "N/A"
 

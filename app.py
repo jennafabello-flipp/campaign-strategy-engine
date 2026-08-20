@@ -122,8 +122,23 @@ class GoogleTaxonomyClassifier:
     Retailer Category data. See module docstring above for tested accuracy."""
 
     def __init__(self, taxonomy_path):
-        with open(taxonomy_path, encoding='utf-8') as f:
-            self.paths = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+        # Try encodings in order of likelihood -- a text file can easily pick up
+        # a BOM or a Windows codepage on the way into a git repo (via Excel,
+        # Windows Notepad, certain Git configs), and strict utf-8 would raise
+        # on any of those rather than degrade gracefully.
+        lines = None
+        last_error = None
+        for enc in ('utf-8-sig', 'cp1252', 'latin-1'):
+            try:
+                with open(taxonomy_path, encoding=enc) as f:
+                    lines = f.readlines()
+                break
+            except (UnicodeDecodeError, UnicodeError) as e:
+                last_error = e
+                continue
+        if lines is None:
+            raise last_error
+        self.paths = [l.strip() for l in lines if l.strip() and not l.startswith('#')]
         self.index = defaultdict(list)
         self.phrase_index = defaultdict(list)
         word_doc_count = defaultdict(int)
@@ -953,6 +968,20 @@ def render_single_campaign_matrix():
                 for p in _debug_candidates:
                     exists = os.path.exists(p)
                     st.caption(f"{'✅' if exists else '❌'} `{os.path.abspath(p)}`")
+                # If a path exists but the classifier still failed to build, the
+                # exception is being silently swallowed by load_taxonomy_classifier's
+                # deliberate fail-safe (so a bad file can't crash the whole app).
+                # Reproduce it here, unguarded, so the real error is visible instead
+                # of just "not loaded."
+                if _debug_clf is None:
+                    existing = next((p for p in _debug_candidates if os.path.exists(p)), None)
+                    if existing:
+                        st.caption("A path exists but building the classifier failed — attempting again here to show the real error:")
+                        try:
+                            _ = GoogleTaxonomyClassifier(existing)
+                            st.warning("Rebuilt successfully just now — this may have been a transient issue. Try refreshing the page.")
+                        except Exception as _debug_e:
+                            st.exception(_debug_e)
 
             def build_cat_agg(cat_col, level):
                 if not cat_col or cat_col not in df_prod.columns: return pd.DataFrame()

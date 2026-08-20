@@ -936,6 +936,24 @@ def render_single_campaign_matrix():
             col_l2, src_l2 = resolve_taxonomy_column_by_level(df_prod, level=2)
             col_l3, src_l3 = resolve_taxonomy_column_by_level(df_prod, level=3)
 
+            with st.expander("🔍 Taxonomy Classifier Status (debug)"):
+                _debug_clf = load_taxonomy_classifier()
+                _debug_candidates = []
+                try:
+                    _debug_candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_data", "Taxonomy_en-US.txt"))
+                except NameError:
+                    pass
+                _debug_candidates.append(os.path.join("reference_data", "Taxonomy_en-US.txt"))
+                _debug_candidates.append("Taxonomy_en-US.txt")
+                if _debug_clf is not None:
+                    st.success(f"✅ Loaded successfully — {len(_debug_clf.paths):,} category paths in the taxonomy.")
+                else:
+                    st.error("❌ Not loaded — every product with no Custom ID / Retailer Category will show as 'General Merchandise'.")
+                st.caption("Checked these paths, in order (first one found wins):")
+                for p in _debug_candidates:
+                    exists = os.path.exists(p)
+                    st.caption(f"{'✅' if exists else '❌'} `{os.path.abspath(p)}`")
+
             def build_cat_agg(cat_col, level):
                 if not cat_col or cat_col not in df_prod.columns: return pd.DataFrame()
                 df_temp = df_prod.copy()

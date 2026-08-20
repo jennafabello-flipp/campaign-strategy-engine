@@ -40,6 +40,11 @@ _TAXONOMY_STOPWORDS = {
     'stainless','steel','finish','matte','glossy','large','small','medium',
     'power','capacity','premium','deluxe','classic','modern',
     'propane','butane','charcoal',
+    # Design/shape descriptors that collide with literal food/object categories --
+    # "mushroom" here means lamp-shaped-like-a-mushroom, not the vegetable, but
+    # it's also a real taxonomy leaf (Food Items > ... > Mushrooms) that was
+    # winning outright over the correct Home & Garden > Lighting match.
+    'mushroom','mushrooms','pineapple','pumpkin','acorn',
     'avec', 'de', 'du', 'des', 'la', 'le', 'les', 'un', 'une', 'et', 'pour', 'en',
     'po', 'pi', 'pieds', 'taille', 'fini', 'noir', 'blanc', 'gris', 'argent',
 }

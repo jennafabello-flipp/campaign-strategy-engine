@@ -581,7 +581,16 @@ def render_single_campaign_matrix():
         cr_grouped.rename(columns={'Clean_Name': 'Name'}, inplace=True)
         cr_grouped['Asset TTMR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['TTMs'] / cr_grouped['Views'], 0.0)
         cr_grouped['Asset CTR %'] = np.where(cr_grouped['Views'] > 0, cr_grouped['Clicks'] / cr_grouped['Views'], 0.0)
-        return cr_grouped.sort_values(by=['TTMs', 'Clicks'], ascending=False)
+
+        # Rank by Asset TTMR % (matching the table's own label) rather than raw TTMs
+        # volume, which conflates a banner's actual effectiveness with how much
+        # exposure/placement it happened to get. Same small-sample risk as Item CTR
+        # applies here too — an asset with 2 views and 1 TTM shows a meaningless 50%
+        # TTMR — so apply the same views floor before ranking.
+        views_floor = cr_grouped['Views'].quantile(0.5) if len(cr_grouped) > 1 else 0
+        cr_grouped.attrs['views_floor'] = views_floor
+        cr_eligible = cr_grouped[cr_grouped['Views'] >= views_floor]
+        return cr_eligible.sort_values(by=['Asset TTMR %', 'TTMs'], ascending=False)
 
     st.markdown("<div class='main-header'>Campaign Performance Breakdown</div>", unsafe_allow_html=True)
     st.markdown("<div class='sub-header'>Upload raw exports directly (single file or split files). The engine will process and combine them automatically.</div>", unsafe_allow_html=True)
@@ -903,6 +912,8 @@ def render_single_campaign_matrix():
                 breakdown_map = {"Language": "Flyer Description", "Campaign": "Flyer Run Name"}
                 selected_cols = [breakdown_map[c] for c in breakdown_choice if breakdown_map[c] in df_creative.columns]
                 cr_agg_display = clean_and_group_creative_assets(df_creative, breakdown_cols=selected_cols)
+                cr_views_floor = cr_agg_display.attrs.get('views_floor', 0)
+                st.caption(f"Ranked by TTMR % (TTMs \u00f7 Views). Limited to assets with at least {cr_views_floor:,.0f} views (the median for this data) to avoid low-sample noise.")
                 display_cols = ['Name'] + selected_cols + ['Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']
                 render_presentation_table(
                     cr_agg_display[display_cols],

@@ -361,7 +361,14 @@ def process_scroll_file(scroll_file, period_name=None):
         else: agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
         
+        # Exact match first, then a small set of common alternate phrasings — this
+        # column name isn't guaranteed to be identical across every retailer's
+        # export, and an exact-only match would silently disable the weekly
+        # rollup (falling back to one bucket per raw Flyer Run Name) rather than
+        # erroring, which could go unnoticed for a while.
         avail_from_col = next((c for c in df_sc.columns if c.lower() == 'available from'), None)
+        if not avail_from_col:
+            avail_from_col = next((c for c in df_sc.columns if any(k in c.lower() for k in ['available from', 'start date', 'flyer start', 'valid from', 'live date'])), None)
 
         if id_col and df_sc[id_col].nunique() > 1:
             # Roll up back-to-back content refreshes into weekly buckets — a

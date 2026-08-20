@@ -428,7 +428,27 @@ def render_signal_comparison_card():
     """
     st.markdown(html, unsafe_allow_html=True)
 
-def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False, hide_index=True, max_height=None):
+def append_total_row(df, sum_cols, ctr_col=None, ctr_numerator_col=None, ctr_denominator_col=None, label_col=None, label_text="TOTAL"):
+    """Appends a 'Total' row summing the given numeric columns across exactly the
+    rows passed in (e.g. a displayed Top 10, not the full underlying dataset).
+    If ctr_col is given, that column is NOT summed directly (summing a percentage
+    is meaningless) — it's recalculated as ctr_numerator_col / ctr_denominator_col
+    across the total, the same weighted approach used everywhere else in this app."""
+    if df.empty:
+        return df
+    total_row = {col: "" for col in df.columns}
+    for col in sum_cols:
+        if col in df.columns:
+            total_row[col] = df[col].sum()
+    if ctr_col and ctr_numerator_col in df.columns and ctr_denominator_col in df.columns:
+        denom = df[ctr_denominator_col].sum()
+        total_row[ctr_col] = (df[ctr_numerator_col].sum() / denom) if denom else 0.0
+    if label_col and label_col in df.columns:
+        total_row[label_col] = label_text
+    total_df = pd.DataFrame([total_row])[df.columns]
+    return pd.concat([df, total_df], ignore_index=True)
+
+def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_color="white", highlight_first_row=False, highlight_last_row=False, hide_index=True, max_height=None):
     """Renders a static, slide-ready HTML table with a colored header row.
     Use this instead of st.dataframe whenever the output needs to look good
     dropped straight into a deck (st.dataframe's interactive grid ignores
@@ -436,7 +456,8 @@ def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_
 
     hide_index=False keeps the row index visible (e.g. for pivot tables where
     the index IS the meaningful row label). max_height adds a scrollable
-    container for long tables."""
+    container for long tables. highlight_last_row is meant for a Total row
+    appended at the bottom (see append_total_row)."""
     styler = df.style
     if hide_index:
         styler = styler.hide(axis='index')
@@ -465,6 +486,12 @@ def render_presentation_table(df, fmt=None, header_color="#153d64", header_text_
         first_idx = df.index[0]
         styler = styler.apply(
             lambda row: ['background-color: #eef3f8; font-weight: 700;' for _ in row] if row.name == first_idx else ['' for _ in row],
+            axis=1
+        )
+    if highlight_last_row and len(df) > 0:
+        last_idx = df.index[-1]
+        styler = styler.apply(
+            lambda row: ['background-color: #eef3f8; font-weight: 700;' for _ in row] if row.name == last_idx else ['' for _ in row],
             axis=1
         )
 
@@ -750,14 +777,26 @@ def render_single_campaign_matrix():
         
         st.write("---")
         st.subheader("🏆 Top 10 Items by Total Clicks (Volume)")
-        render_presentation_table(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
+        top10_clicks_df = pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Clicks', ascending=False).head(10).reset_index(drop=True)
+        top10_clicks_with_total = append_total_row(
+            top10_clicks_df, sum_cols=['Views', 'Clicks', 'Clips', 'TTMs'],
+            ctr_col='Item CTR', ctr_numerator_col='Clicks', ctr_denominator_col='Views',
+            label_col='Name', label_text='TOTAL (Top 10)'
+        )
+        render_presentation_table(top10_clicks_with_total, fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}, highlight_last_row=True)
 
         st.write("---")
         st.subheader("🎯 Top 10 Items by Item CTR (Efficiency)")
         pivot_ctr_floor = pivot_top['Views'].quantile(0.5) if len(pivot_top) > 1 else 0
         pivot_ctr_eligible = pivot_top[pivot_top['Views'] >= pivot_ctr_floor]
         st.caption(f"Limited to items with at least {pivot_ctr_floor:,.0f} views (the median for this data) to avoid low-sample noise skewing CTR.")
-        render_presentation_table(pivot_ctr_eligible[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
+        top10_ctr_df = pivot_ctr_eligible[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10).reset_index(drop=True)
+        top10_ctr_with_total = append_total_row(
+            top10_ctr_df, sum_cols=['Views', 'Clicks', 'Clips', 'TTMs'],
+            ctr_col='Item CTR', ctr_numerator_col='Clicks', ctr_denominator_col='Views',
+            label_col='Name', label_text='TOTAL (Top 10)'
+        )
+        render_presentation_table(top10_ctr_with_total, fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'}, highlight_last_row=True)
         
         st.write("---")
         st.subheader("📊 Item Allocation vs Click Share")

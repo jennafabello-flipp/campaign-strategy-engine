@@ -980,7 +980,7 @@ def render_single_campaign_matrix():
                     st.caption("The actual error (this is no longer cached — it will retry fresh on the next rerun once fixed):")
                     st.exception(_debug_error)
 
-            def build_cat_agg(cat_col, level):
+            def build_cat_agg(cat_col, level, include_marketing_asset=False):
                 if not cat_col or cat_col not in df_prod.columns: return pd.DataFrame()
                 df_temp = df_prod.copy()
                 df_temp['Parsed_Cat'] = df_temp[cat_col].apply(lambda x: parse_breadcrumb_level(x, level))
@@ -992,14 +992,32 @@ def render_single_campaign_matrix():
                 c_agg = df_temp.groupby('Parsed_Cat').agg(
                     Count=('SKU', 'count'), Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), Clips=('Clips', 'sum'), TTMs=('TTMs', 'sum')
                 ).reset_index()
-                
                 c_agg.rename(columns={'Parsed_Cat': 'Category Name'}, inplace=True)
+
+                # Marketing/creative assets are filtered OUT of df_prod entirely (they're
+                # banners, not products), so they never show up in this breakdown at all
+                # by default. Adding them back as their own labeled row -- only at L1,
+                # since a single "Marketing Asset" bucket doesn't have a meaningful
+                # subcategory breakdown the way real products do -- lets this view show
+                # the full picture: what share of allocation/clicks is actual product vs.
+                # marketing creative, in one table instead of two separate ones.
+                if include_marketing_asset and not df_creative.empty:
+                    marketing_row = pd.DataFrame([{
+                        'Category Name': 'Marketing Asset',
+                        'Count': len(df_creative),
+                        'Views': df_creative['Views'].sum(),
+                        'Clicks': df_creative['Clicks'].sum(),
+                        'Clips': df_creative['Clips'].sum(),
+                        'TTMs': df_creative['TTMs'].sum(),
+                    }])
+                    c_agg = pd.concat([c_agg, marketing_row], ignore_index=True)
+
                 c_agg['Item Allocation'] = c_agg['Count'] / c_agg['Count'].sum() if c_agg['Count'].sum() > 0 else 0
                 c_agg['Item Click'] = c_agg['Clicks'] / c_agg['Clicks'].sum() if c_agg['Clicks'].sum() > 0 else 0
                 c_agg['Add to List'] = c_agg['Clips'] / c_agg['Clips'].sum() if c_agg['Clips'].sum() > 0 else 0
                 return c_agg
 
-            cat_l1_agg = build_cat_agg(col_l1, level=1)
+            cat_l1_agg = build_cat_agg(col_l1, level=1, include_marketing_asset=True)
             cat_l2_agg = build_cat_agg(col_l2, level=2)
             cat_l3_agg = build_cat_agg(col_l3, level=3)
             

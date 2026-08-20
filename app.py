@@ -754,7 +754,10 @@ def render_single_campaign_matrix():
 
         st.write("---")
         st.subheader("🎯 Top 10 Items by Item CTR (Efficiency)")
-        render_presentation_table(pivot_top[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
+        pivot_ctr_floor = pivot_top['Views'].quantile(0.5) if len(pivot_top) > 1 else 0
+        pivot_ctr_eligible = pivot_top[pivot_top['Views'] >= pivot_ctr_floor]
+        st.caption(f"Limited to items with at least {pivot_ctr_floor:,.0f} views (the median for this data) to avoid low-sample noise skewing CTR.")
+        render_presentation_table(pivot_ctr_eligible[['SKU', 'Name', 'Page', 'Views', 'Clicks', 'Clips', 'TTMs', 'Item CTR']].sort_values(by='Item CTR', ascending=False).head(10), fmt={'Views': '{:,.0f}', 'Clicks': '{:,.0f}', 'Clips': '{:,.0f}', 'TTMs': '{:,.0f}', 'Item CTR': '{:.2%}'})
         
         st.write("---")
         st.subheader("📊 Item Allocation vs Click Share")

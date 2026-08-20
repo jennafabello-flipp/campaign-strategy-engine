@@ -186,6 +186,21 @@ def process_metrics(df, m):
         
     df.loc[is_sku_clone, 'Brand'] = df.loc[is_sku_clone, 'Name'].apply(lambda x: str(x).split()[0].upper() if str(x).strip() != "" else "GENERIC")
 
+    # Capture whether this row had a genuine SKU in the source file, BEFORE the
+    # line below overwrites df['SKU'] with the fallback cascade (URL parsing,
+    # Brand/Page/Price fingerprint, or Name). This has to run first — m['sku']
+    # maps to a column literally named 'SKU' in most exports, so reading it
+    # AFTER the overwrite would always see the fallback value, never blank.
+    # This is what lets us tell a real product with a "Shop Now" LINK apart
+    # from an actual marketing banner: a banner is a LINK row with no real
+    # SKU behind it.
+    if m.get('sku') and m['sku'] in df.columns:
+        _raw_sku_series = df[m['sku']]
+        _raw_sku_str = _raw_sku_series.astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
+        df['Has_Real_SKU'] = _raw_sku_series.notna() & ~_raw_sku_str.str.lower().isin(['nan', 'none', '', 'null', '0', 'unknown'])
+    else:
+        df['Has_Real_SKU'] = False
+
     def normalize_sku(row):
         s = str(row[m['sku']]).strip() if m['sku'] and m['sku'] in row.index else "UNKNOWN"
         if s.endswith('.0'): s = s[:-2]
@@ -234,7 +249,7 @@ def process_metrics(df, m):
     
     global_totals = {'views': df['Views'].sum(), 'clicks': df['Clicks'].sum(), 'clips': df['Clips'].sum(), 'ttms': df['TTMs'].sum()}
     
-    is_creative = df['Display_Type'].astype(str).isin(['BANNER', 'LINK']) | df['Name'].astype(str).str.contains('BANNER', case=False, na=False)
+    is_creative = (df['Display_Type'].astype(str).isin(['BANNER', 'LINK']) & ~df['Has_Real_SKU']) | df['Name'].astype(str).str.contains('BANNER', case=False, na=False)
     
     df_prod = df[~is_creative].copy()
     df_creative = df[is_creative].copy()
@@ -525,13 +540,23 @@ def render_single_campaign_matrix():
         if s_clean.upper() in ["SAVE", "ÉCONOMISEZ"]: return "SAVE"
         return s_clean
 
-    def clean_and_group_creative_assets(df_creative):
+    def clean_and_group_creative_assets(df_creative, breakdown_cols=None):
         if df_creative.empty: return df_creative
         df_cr = df_creative.copy()
 
         def scrub_creative_name(val):
             if pd.isna(val): return "Unassigned Asset"
             s = str(val).strip()
+            # Pattern seen in real exports: "{digits}{FR|EN}-{system-generated hash}",
+            # e.g. "1805FR-HvaPZTer1Brld". The hash suffix is different every time the
+            # same banner slot gets re-published in a new flyer run, so grouping by
+            # raw name alone fragments one banner into dozens of "different" ones.
+            # Strip both the hash AND the embedded language tag here — language is
+            # tracked separately (Flyer Description), so the base creative identity
+            # shouldn't depend on it.
+            hash_match = re.match(r'^(\d+)(?:FR|EN)-[A-Za-z0-9]+$', s, flags=re.IGNORECASE)
+            if hash_match:
+                return hash_match.group(1)
             s_clean = re.sub(r'-\d+$', '', s)
             s_clean = re.sub(r'_(EN|FR)_', '_', s_clean, flags=re.IGNORECASE)
             s_clean = re.sub(r'_(EN|FR)$', '', s_clean, flags=re.IGNORECASE)
@@ -543,7 +568,13 @@ def render_single_campaign_matrix():
         if 'Page' not in df_cr.columns: df_cr['Page'] = 1
         if 'TTMs' not in df_cr.columns: df_cr['TTMs'] = 0
 
-        cr_grouped = df_cr.groupby(['Clean_Name', 'Page'], observed=False).agg(
+        # Default: fully combined by asset only, across every language and campaign.
+        # breakdown_cols (e.g. ['Flyer Description'] and/or ['Flyer Run Name']) adds
+        # optional additional grouping when the caller wants a more granular view.
+        valid_breakdown_cols = [c for c in (breakdown_cols or []) if c in df_cr.columns]
+        group_keys = ['Clean_Name', 'Page'] + valid_breakdown_cols
+
+        cr_grouped = df_cr.groupby(group_keys, observed=False).agg(
             Views=('Views', 'sum'), Clicks=('Clicks', 'sum'), TTMs=('TTMs', 'sum')
         ).reset_index()
 
@@ -863,9 +894,18 @@ def render_single_campaign_matrix():
             )
         with c_col:
             st.markdown("**Consolidated Marketing Banners (Ranked by TTMR %)**")
-            if not cr_agg.empty:
+            if not df_creative.empty:
+                breakdown_choice = st.multiselect(
+                    "Optional breakdown:", options=["Language", "Campaign"], default=[],
+                    key="banner_breakdown_choice",
+                    help="Leave empty to see each asset's fully combined performance across every language and flyer run."
+                )
+                breakdown_map = {"Language": "Flyer Description", "Campaign": "Flyer Run Name"}
+                selected_cols = [breakdown_map[c] for c in breakdown_choice if breakdown_map[c] in df_creative.columns]
+                cr_agg_display = clean_and_group_creative_assets(df_creative, breakdown_cols=selected_cols)
+                display_cols = ['Name'] + selected_cols + ['Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']
                 render_presentation_table(
-                    cr_agg[['Name', 'Page', 'Views', 'Clicks', 'TTMs', 'Asset TTMR %', 'Asset CTR %']],
+                    cr_agg_display[display_cols],
                     fmt={
                         'Views': '{:,.0f}',
                         'Clicks': '{:,.0f}',

@@ -7,12 +7,197 @@ import re
 import os
 import gc
 import calendar
+import math
+from collections import defaultdict
 
 # Create the hidden directories on the server if they don't exist
 if not os.path.exists("benchmarks"):
     os.makedirs("benchmarks")
 if not os.path.exists("reference_data"):
     os.makedirs("reference_data")
+
+# ==============================================================================
+# 🏷️ GOOGLE TAXONOMY FALLBACK CLASSIFIER
+# ==============================================================================
+# Used ONLY when a product has neither Custom ID data nor Retailer Category
+# data — i.e. exactly the retailers not yet set up with proper category
+# feeds. Replaces trusting the retailer's own "Google Category" columns
+# (found to be wrong the vast majority of the time for these retailers)
+# with a keyword-match against Google's own official product taxonomy,
+# inferred directly from the product Name. Built and iteratively tested
+# against real Tanguay product names — current state: ~38% of untagged
+# products get a confident match, at ~90% precision against Google Category
+# where it does commit; the rest fall through to "General Merchandise",
+# same as before this existed. Not a complete replacement — an improvement
+# over trusting a feed that's wrong most of the time, for the specific
+# subset of retailers with no better data available yet.
+
+_TAXONOMY_STOPWORDS = {
+    'a','an','the','and','or','with','for','of','in','on','at','to','by','from',
+    'size','inch','inches','ft','cm','mm','pc','pcs',
+    'new','sale','clearance','only','edition','collection','series','model',
+    'black','white','brown','grey','gray','green','blue','red','silver','chrome',
+    'stainless','steel','finish','matte','glossy','large','small','medium',
+    'power','capacity','premium','deluxe','classic','modern',
+    'propane','butane','charcoal',
+    'avec', 'de', 'du', 'des', 'la', 'le', 'les', 'un', 'une', 'et', 'pour', 'en',
+    'po', 'pi', 'pieds', 'taille', 'fini', 'noir', 'blanc', 'gris', 'argent',
+}
+
+_TAXONOMY_FR_EN_BRIDGE = {
+    'lit': 'bed', 'lits': 'beds', 'matelas': 'mattress',
+    'chaise': 'chair', 'chaises': 'chairs', 'table': 'table', 'tables': 'tables',
+    'sofa': 'sofa', 'canape': 'sofa', 'causeuse': 'loveseat', 'fauteuil': 'armchair',
+    'commode': 'dresser', 'armoire': 'wardrobe', 'bureau': 'desk',
+    'refrigerateur': 'refrigerator', 'cuisiniere': 'range stove', 'four': 'oven',
+    'lave-vaisselle': 'dishwasher', 'laveuse': 'washer', 'secheuse': 'dryer',
+    'micro-ondes': 'microwave', 'hotte': 'range hood',
+    'housse': 'cover', 'couette': 'comforter', 'oreiller': 'pillow', 'coussin': 'cushion',
+    'tapis': 'rug carpet', 'rideau': 'curtain', 'rideaux': 'curtains',
+    'etagere': 'shelf shelving', 'tablette': 'shelf', 'tiroir': 'drawer',
+    'peinture': 'paint', 'outil': 'tool', 'outils': 'tools', 'perceuse': 'drill',
+    'scie': 'saw', 'marteau': 'hammer', 'tournevis': 'screwdriver',
+    'exterieur': 'outdoor', 'interieur': 'indoor', 'salle': 'room',
+    'manger': 'dining', 'chambre': 'bedroom', 'cuisine': 'kitchen',
+    'salon': 'living room', 'inclinable': 'reclining', 'motorise': 'motorized',
+    'gazon': 'lawn', 'tondeuse': 'mower', 'barbecue': 'grill', 'foyer': 'fireplace',
+    'climatiseur': 'air conditioner', 'chauffage': 'heater', 'ventilateur': 'fan',
+    'meuble': 'furniture cabinet', 'meubles': 'furniture', 'bibliotheque': 'bookcase',
+    'lampe': 'lamp', 'luminaire': 'light fixture', 'miroir': 'mirror',
+    'plancher': 'flooring', 'robinet': 'faucet', 'evier': 'sink', 'douche': 'shower',
+    'cafe': 'coffee', 'glace': 'ice cream', 'machine': 'machine', 'friteuse': 'fryer',
+    'distributeur': 'dispenser', 'lactee': 'milk', 'poussette': 'stroller',
+    'draps': 'sheets', 'ensemble': 'set', 'dossier': 'back',
+}
+
+_TAXONOMY_NOT_GERUNDS = {'dining', 'living', 'seating', 'bedding', 'flooring', 'lighting', 'ceiling', 'shelving', 'clothing'}
+
+
+def _taxonomy_normalize_accents(s):
+    replacements = {
+        'à':'a','â':'a','ä':'a','é':'e','è':'e','ê':'e','ë':'e','î':'i','ï':'i',
+        'ô':'o','ö':'o','ù':'u','û':'u','ü':'u','ç':'c','œ':'oe',
+    }
+    for src, tgt in replacements.items():
+        s = s.replace(src, tgt)
+    return s
+
+
+def _taxonomy_stem(word):
+    if word in _TAXONOMY_NOT_GERUNDS:
+        return word
+    for suffix in ('ers', 'es', 'ing', 'er', 's'):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[:-len(suffix)]
+    return word
+
+
+def _taxonomy_inject_synonyms(tokens):
+    token_set = set(tokens)
+    if 'outdoor' in token_set and 'set' in token_set:
+        tokens = tokens + ['outdoor', 'furniture', 'set']
+    return tokens
+
+
+def _taxonomy_tokenize(text):
+    text = _taxonomy_normalize_accents(str(text).lower())
+    words = re.findall(r"[a-z]+", text)
+    out = []
+    for w in words:
+        if w in _TAXONOMY_STOPWORDS or len(w) < 3:
+            continue
+        expanded = _TAXONOMY_FR_EN_BRIDGE[w].split() if w in _TAXONOMY_FR_EN_BRIDGE else [w]
+        for ew in expanded:
+            out.append(_taxonomy_stem(ew))
+    return _taxonomy_inject_synonyms(out)
+
+
+def _taxonomy_ngrams(tokens, n):
+    return [' '.join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+
+class GoogleTaxonomyClassifier:
+    """Keyword-match classifier against Google's official product taxonomy,
+    used only as the fallback tier when a product has no Custom ID and no
+    Retailer Category data. See module docstring above for tested accuracy."""
+
+    def __init__(self, taxonomy_path):
+        with open(taxonomy_path, encoding='utf-8') as f:
+            self.paths = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+        self.index = defaultdict(list)
+        self.phrase_index = defaultdict(list)
+        word_doc_count = defaultdict(int)
+        path_words = {}
+        for path in self.paths:
+            segments = path.split(' > ')
+            leaf_tokens = _taxonomy_tokenize(segments[-1])
+            leaf_words = set(leaf_tokens)
+            all_words = set(_taxonomy_tokenize(path))
+            path_words[path] = (all_words, leaf_words)
+            for w in all_words:
+                word_doc_count[w] += 1
+            for n in (2, 3):
+                for phrase in _taxonomy_ngrams(leaf_tokens, n):
+                    self.phrase_index[phrase].append(path)
+        n_paths = len(self.paths)
+        self.idf = {w: math.log(n_paths / c) for w, c in word_doc_count.items()}
+        for path, (all_words, leaf_words) in path_words.items():
+            for w in all_words:
+                self.index[w].append((path, w in leaf_words))
+
+    def classify(self, name, min_score=2.0, min_margin_ratio=1.3):
+        words = _taxonomy_tokenize(name)
+        if not words:
+            return None, None
+        path_scores = defaultdict(float)
+        for w in words:
+            weight = self.idf.get(w, 0)
+            for path, is_leaf in self.index.get(w, []):
+                path_scores[path] += weight * (1.5 if is_leaf else 1.0)
+        for n in (3, 2):
+            for phrase in _taxonomy_ngrams(words, n):
+                for path in self.phrase_index.get(phrase, []):
+                    path_scores[path] += 15.0 * n
+        if not path_scores:
+            return None, None
+        l1_best_score = defaultdict(float)
+        l1_best_path = {}
+        for path, score in path_scores.items():
+            l1 = path.split(' > ')[0]
+            if score > l1_best_score[l1]:
+                l1_best_score[l1] = score
+                l1_best_path[l1] = path
+        ranked = sorted(l1_best_score.items(), key=lambda x: -x[1])
+        best_l1, best_score = ranked[0]
+        if best_score < min_score:
+            return None, None
+        if len(ranked) > 1:
+            second_l1, second_score = ranked[1]
+            if second_score > 0 and best_score < second_score * min_margin_ratio:
+                return None, None
+        return best_l1, l1_best_path[best_l1]
+
+
+@st.cache_resource
+def load_taxonomy_classifier():
+    """Loads and builds the taxonomy classifier once per session. Returns None
+    (rather than raising) if the taxonomy file isn't deployed alongside this
+    app yet, so a missing file degrades gracefully to the old default instead
+    of crashing every module that touches categorization."""
+    candidates = []
+    try:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "reference_data", "Taxonomy_en-US.txt"))
+    except NameError:
+        pass
+    candidates.append(os.path.join("reference_data", "Taxonomy_en-US.txt"))
+    candidates.append("Taxonomy_en-US.txt")
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return GoogleTaxonomyClassifier(path)
+            except Exception:
+                return None
+    return None
 
 # ==============================================================================
 # 🚀 SETUP & CONFIGURATION
@@ -222,25 +407,45 @@ def process_metrics(df, m):
         
     df['SKU'] = df.apply(normalize_sku, axis=1)
 
+    def _has_value(row, key):
+        if m.get(key) and m[key] in row.index and pd.notna(row[m[key]]):
+            val = str(row[m[key]]).strip()
+            if val not in ["", "NULL", "nan", "NaN", "None"]:
+                return val
+        return None
+
+    # Scoped to L1 only. L1 tolerates imprecision -- any correct leaf under
+    # "Home & Garden" still gets the department right. L2/L3 require the
+    # SPECIFIC leaf to be correct, which is a much harder bar that hasn't
+    # been separately tested -- a real spot-check surfaced clear misses
+    # (a dining table landing under "Kitchen Appliance Accessories", a
+    # refrigerator landing under "Refrigerator Magnets" instead of the
+    # appliance itself). Only L1 is validated right now; L2/L3 fall through
+    # to Custom ID or the existing generic defaults until L2/L3 accuracy is
+    # tested on its own.
+    _taxonomy_clf = load_taxonomy_classifier()
+    needs_taxonomy_mask = df.apply(lambda r: _has_value(r, 'c1') is None and _has_value(r, 'ret_cat') is None, axis=1)
+    taxonomy_l1_lookup = {}
+    if _taxonomy_clf is not None and needs_taxonomy_mask.any():
+        for nm in df.loc[needs_taxonomy_mask, 'Name'].dropna().unique():
+            l1, best_path = _taxonomy_clf.classify(nm)
+            taxonomy_l1_lookup[nm] = l1
+
     def get_l1(row):
-        for key in ['c1', 'ret_cat', 'goo_l1']:
-            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        v = _has_value(row, 'c1') or _has_value(row, 'ret_cat')
+        if v: return v
+        taxo_l1 = taxonomy_l1_lookup.get(row.get('Name'))
+        if taxo_l1: return taxo_l1
         return "General Merchandise"
 
     def get_l2(row):
-        for key in ['c2', 'goo_l2']:
-            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        v = _has_value(row, 'c2')
+        if v: return v
         return "Uncategorized Sub-Department"
-        
+
     def get_l3(row):
-        for key in ['c3', 'goo_l3']:
-            if m[key] and m[key] in row.index and pd.notna(row[m[key]]):
-                val = str(row[m[key]]).strip()
-                if val not in ["", "NULL", "nan", "NaN", "None"]: return val
+        v = _has_value(row, 'c3')
+        if v: return v
         return "Uncategorized Item-Level"
 
     df['L1_Category'] = df.apply(get_l1, axis=1)

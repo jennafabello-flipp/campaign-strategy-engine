@@ -361,12 +361,41 @@ def process_scroll_file(scroll_file, period_name=None):
         else: agg['Approx Page'] = "N/A"
         agg['Milestone'] = agg[sd_col]
         
+        avail_from_col = next((c for c in df_sc.columns if c.lower() == 'available from'), None)
+
         if id_col and df_sc[id_col].nunique() > 1:
-            week_agg = df_sc.groupby([id_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
+            # Roll up back-to-back content refreshes into weekly buckets — a
+            # "Flyer Run Name" can just be a mid-week content refresh, not a
+            # genuinely separate campaign. Bucketing by the calendar week a
+            # segment went live (Monday-start) gives an apples-to-apples
+            # comparison unit that matches how campaigns are actually planned,
+            # rather than comparing a 2-day refresh tail against a full 7-day
+            # run as if they were equally-weighted campaigns. This is a
+            # simplification: a segment that spans a week boundary gets
+            # attributed entirely to the week it went live, since the source
+            # data has no day-by-day breakdown within a segment to split more
+            # precisely than that.
+            week_to_flyer_names = {}
+            if avail_from_col:
+                df_sc['_avail_from_dt'] = pd.to_datetime(df_sc[avail_from_col], errors='coerce')
+                df_sc['_week_start'] = df_sc['_avail_from_dt'] - pd.to_timedelta(df_sc['_avail_from_dt'].dt.weekday, unit='D')
+                week_col = '_week_start'
+            else:
+                week_col = id_col
+
+            week_agg = df_sc.groupby([week_col, sd_col]).agg({cr_col: 'sum', tr_col: 'sum', 'sort_val': 'first'}).reset_index()
             week_agg['Retention'] = np.where(week_agg[tr_col] > 0, week_agg[cr_col] / week_agg[tr_col], 0)
-            weekly_data = week_agg.sort_values([id_col, 'sort_val']).rename(columns={id_col: 'Campaign/Week', sd_col: 'Milestone'})
-            
-            week_score = weekly_data.groupby('Campaign/Week')['Retention'].sum()
+            weekly_data = week_agg.sort_values([week_col, 'sort_val']).rename(columns={week_col: 'Campaign/Week', sd_col: 'Milestone'})
+
+            if avail_from_col:
+                for wk, grp in df_sc.groupby('_week_start'):
+                    week_to_flyer_names[f"Week of {wk.strftime('%b %d, %Y')}"] = sorted(grp[id_col].dropna().unique().tolist())
+                weekly_data['Campaign/Week'] = weekly_data['Campaign/Week'].apply(lambda d: f"Week of {d.strftime('%b %d, %Y')}")
+            else:
+                for name in weekly_data['Campaign/Week'].unique():
+                    week_to_flyer_names[name] = [name]
+
+            week_score = weekly_data.groupby('Campaign/Week')[cr_col].sum()
             vol_week = week_score.idxmax()
             vol_score = week_score.max()
 
@@ -380,13 +409,38 @@ def process_scroll_file(scroll_file, period_name=None):
 
             hl_data = weekly_data[(weekly_data['Campaign/Week'] == vol_week) & (weekly_data['Retention'] < 0.50)]
             hl_milestone = hl_data.iloc[0]['Milestone'] if not hl_data.empty else "Finished Flyer"
-                
+
+            # Per-campaign summary: cliff point + final retention for every campaign,
+            # not just the three cherry-picked superlatives above — this is what
+            # actually lets you compare campaigns against each other as more of them
+            # come in, rather than only ever seeing "who won this one metric."
+            per_campaign_rows = []
+            for camp, camp_df in weekly_data.groupby('Campaign/Week'):
+                camp_df = camp_df.sort_values('sort_val')
+                cliff_rows = camp_df[camp_df['Retention'] < 0.50]
+                if not cliff_rows.empty:
+                    cliff_milestone = cliff_rows.iloc[0]['Milestone']
+                    cliff_retention = cliff_rows.iloc[0]['Retention']
+                else:
+                    cliff_milestone = "Never drops below 50%"
+                    cliff_retention = camp_df.iloc[-1]['Retention']
+                per_campaign_rows.append({
+                    'Campaign/Week': camp,
+                    'Total Readers': camp_df[tr_col].iloc[0] if tr_col in camp_df.columns else None,
+                    'Cliff Milestone': cliff_milestone,
+                    'Cliff Retention': cliff_retention,
+                    'Final Retention': camp_df.iloc[-1]['Retention']
+                })
+            per_campaign_summary = pd.DataFrame(per_campaign_rows).sort_values('Total Readers', ascending=False)
+
             qbr_insights = {
                 'vol_week': vol_week,
                 'vol_score': vol_score,
                 'eff_week': eff_week,
                 'eff_drop': eff_drop,
-                'hl_milestone': hl_milestone
+                'hl_milestone': hl_milestone,
+                'per_campaign_summary': per_campaign_summary,
+                'week_to_flyer_names': week_to_flyer_names
             }
 
     else:
@@ -1021,7 +1075,7 @@ def render_single_campaign_matrix():
             
             st.markdown(f"""
             **1. Total Content Consumed (Highest Volume)**
-            * **Winner:** **{qbr_insights['vol_week']}**
+            * **Winner:** **{qbr_insights['vol_week']}** ({qbr_insights['vol_score']:,.0f} total page-reads across all scroll depths)
             * **Why it won:** This flyer drove the highest absolute volume of page reads. Even if users dropped off over time, its structure generated the most total brand engagement.
 
             **2. Engagement Efficiency (Lowest Drop-off Velocity)**
@@ -1032,7 +1086,57 @@ def render_single_campaign_matrix():
             * **Insight:** For your highest volume flyer ({qbr_insights['vol_week']}), you successfully kept the majority of your audience up until the **{qbr_insights['hl_milestone']}** mark.
             * **Why it matters:** Any products or categories placed after this 50% drop-off threshold were essentially invisible to the majority of your weekly traffic.
             """)
-            
+
+            per_campaign_summary = qbr_insights.get('per_campaign_summary')
+            if per_campaign_summary is not None and not per_campaign_summary.empty:
+                st.markdown("**Campaign-by-Campaign Comparison**")
+                st.caption("Sorted by audience size (Total Readers) — use this to spot whether retention is trending up or down as you run more campaigns, not just which single campaign 'won.'")
+                render_presentation_table(
+                    per_campaign_summary[['Campaign/Week', 'Total Readers', 'Cliff Milestone', 'Cliff Retention', 'Final Retention']],
+                    fmt={'Total Readers': '{:,.0f}', 'Cliff Retention': '{:.1%}', 'Final Retention': '{:.1%}'}
+                )
+
+                st.markdown("**Why Each Campaign's Drop-off Happened**")
+                week_to_flyer_names = qbr_insights.get('week_to_flyer_names', {})
+                for _, camp_row in per_campaign_summary.iterrows():
+                    camp_name = camp_row['Campaign/Week']
+                    flyer_names_in_bucket = week_to_flyer_names.get(camp_name, [camp_name])
+                    camp_prod = df_prod[df_prod.get('Flyer Run Name', pd.Series(dtype=object)).isin(flyer_names_in_bucket)] if not df_prod.empty and 'Flyer Run Name' in df_prod.columns else pd.DataFrame()
+                    camp_creative = df_creative[df_creative.get('Flyer Run Name', pd.Series(dtype=object)).isin(flyer_names_in_bucket)] if not df_creative.empty and 'Flyer Run Name' in df_creative.columns else pd.DataFrame()
+
+                    if camp_prod.empty and camp_creative.empty:
+                        st.markdown(f"- **{camp_name}**: No matching product/merchandise data found for this campaign — can't diagnose *why* the drop-off happened, only that it did (see table above).")
+                        continue
+
+                    if camp_row['Cliff Milestone'] == "Never drops below 50%":
+                        st.markdown(f"- **{camp_name}**: Never drops below 50% retention — no cliff to diagnose.")
+                        continue
+
+                    cliff_pg_int = 1
+                    if 'Approx Page' in df_sc_table.columns:
+                        pg_match = df_sc_table[df_sc_table['Scroll Depth'] == camp_row['Cliff Milestone']]
+                        if not pg_match.empty:
+                            cliff_pg_int = max(1, int(pg_match.iloc[0]['Approx Page']))
+
+                    camp_prod_page_clicks = camp_prod[camp_prod['Page'] == cliff_pg_int]['Clicks'].sum() if not camp_prod.empty else 0
+                    camp_creative_page_clicks = camp_creative[camp_creative['Page'] == cliff_pg_int]['Clicks'].sum() if not camp_creative.empty else 0
+                    camp_total_clicks = camp_prod['Clicks'].sum() + camp_creative['Clicks'].sum() if not camp_prod.empty else camp_creative['Clicks'].sum()
+
+                    if camp_total_clicks > 0:
+                        creative_share = camp_creative_page_clicks / camp_total_clicks
+                        prod_share = camp_prod_page_clicks / camp_total_clicks
+                        if creative_share > 0.10:
+                            reason = f"Leaky Bucket — {camp_creative_page_clicks:,.0f} clicks on marketing banners on Page {cliff_pg_int}, likely exiting to browse the main site."
+                        elif prod_share > 0.15:
+                            reason = f"Shopping Spree — Page {cliff_pg_int} items captured {prod_share:.1%} of this campaign's clicks; shoppers likely found what they wanted and clicked out."
+                        else:
+                            reason = f"Content Friction — low click engagement on Page {cliff_pg_int} relative to the drop, suggesting the product mix or layout there failed to hold attention."
+                    else:
+                        reason = "No click activity recorded on the cliff page for this campaign."
+                    st.markdown(f"- **{camp_name}** (cliff at {camp_row['Cliff Milestone']}, ~Page {cliff_pg_int}): {reason}")
+
+            st.write("")
+
         sc_col1, sc_col2 = st.columns([1, 2])
         with sc_col1:
             st.markdown("**Global Average Retention**")
